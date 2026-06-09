@@ -11,7 +11,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
-  DEFAULT_MODEL,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthReviewWriteScope,
@@ -24,7 +23,6 @@ import {
   AuthSessionId,
   CommandId,
   EventId,
-  MessageId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -37,7 +35,6 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
-  ProviderInstanceId,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   OrchestrationReplayEventsError,
@@ -60,7 +57,8 @@ import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
-import { buildOwnerPlanningPrompt } from "./agentPlans/prompts.ts";
+import { AgentPlanServiceLive } from "./agentPlans/Layers/AgentPlanService.ts";
+import { AgentPlanService } from "./agentPlans/Services/AgentPlanService.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -274,6 +272,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const agentPlanService = yield* AgentPlanService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -980,175 +979,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning,
-            Effect.gen(function* () {
-              const detail = yield* projectionSnapshotQuery
-                .getAgentPlanDetailById(input.planId)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(cause, `Failed to load agent plan ${input.planId}`),
-                  ),
-                );
-
-              if (Option.isNone(detail)) {
-                return yield* new OrchestrationDispatchCommandError({
-                  message: `Agent plan ${input.planId} was not found`,
-                  cause: input.planId,
-                });
-              }
-
-              const plan = detail.value.plan;
-              if (
-                plan.ownerThreadId !== null &&
-                (plan.status === "planning" || plan.status === "running")
-              ) {
-                return yield* new OrchestrationDispatchCommandError({
-                  message: "Agent plan already has an active owner planning thread.",
-                  cause: plan.ownerThreadId,
-                });
-              }
-
-              const projectShells = yield* Effect.forEach(plan.projectIds, (projectId) =>
-                projectionSnapshotQuery.getProjectShellById(projectId).pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(
-                      cause,
-                      `Failed to load project ${projectId} for agent plan ${plan.id}`,
-                    ),
-                  ),
-                  Effect.flatMap((project) =>
-                    Option.isSome(project)
-                      ? Effect.succeed(project.value)
-                      : Effect.fail(
-                          new OrchestrationDispatchCommandError({
-                            message: `Project ${projectId} for agent plan ${plan.id} was not found.`,
-                            cause: projectId,
-                          }),
-                        ),
-                  ),
-                ),
-              );
-
-              const primaryProject =
-                projectShells.find((project) => project.id === plan.primaryProjectId) ??
-                projectShells[0] ??
-                null;
-              if (primaryProject === null) {
-                return yield* new OrchestrationDispatchCommandError({
-                  message: "Agent plan must include at least one project before owner planning.",
-                  cause: plan.id,
-                });
-              }
-
-              const modelSelection = input.modelSelection ??
-                primaryProject.defaultModelSelection ?? {
-                  instanceId: ProviderInstanceId.make("codex"),
-                  model: DEFAULT_MODEL,
-                };
-              const runtimeMode = input.runtimeMode ?? "approval-required";
-              const interactionMode = input.interactionMode ?? "plan";
-              const now = yield* nowIso;
-              const ownerThreadId = yield* randomUUID.pipe(Effect.map(ThreadId.make));
-              const messageId = yield* randomUUID.pipe(Effect.map(MessageId.make));
-              const ownerThreadTitle = `Owner plan: ${plan.title}`;
-              const prompt = buildOwnerPlanningPrompt({
-                userPrompt: plan.userPrompt,
-                projectSummaries: projectShells.map((project) => ({
-                  projectId: project.id,
-                  title: project.title,
-                  workspaceRoot: project.workspaceRoot,
-                })),
-              });
-
-              const updateResult = yield* dispatchNormalizedCommand({
-                type: "agent-plan.update",
-                commandId: yield* serverCommandId("agent-plan-owner-link"),
-                planId: plan.id,
-                ownerThreadId,
-              });
-              const statusResult = yield* dispatchNormalizedCommand({
-                type: "agent-plan.status.set",
-                commandId: yield* serverCommandId("agent-plan-owner-status"),
-                planId: plan.id,
-                status: "planning",
-              }).pipe(
-                Effect.tapError(() =>
-                  serverCommandId("agent-plan-owner-link-clear").pipe(
-                    Effect.flatMap((commandId) =>
-                      dispatchNormalizedCommand({
-                        type: "agent-plan.update",
-                        commandId,
-                        planId: plan.id,
-                        ownerThreadId: null,
-                      }),
-                    ),
-                    Effect.catch(() => Effect.void),
-                  ),
-                ),
-              );
-
-              const markOwnerPlanningFailed = Effect.gen(function* () {
-                yield* dispatchNormalizedCommand({
-                  type: "agent-plan.status.set",
-                  commandId: yield* serverCommandId("agent-plan-owner-status-failed"),
-                  planId: plan.id,
-                  status: "failed",
-                }).pipe(Effect.catch(() => Effect.void));
-                yield* dispatchNormalizedCommand({
-                  type: "agent-plan.update",
-                  commandId: yield* serverCommandId("agent-plan-owner-link-clear"),
-                  planId: plan.id,
-                  ownerThreadId: null,
-                }).pipe(Effect.catch(() => Effect.void));
-              });
-
-              const turnResult = yield* dispatchNormalizedCommand({
-                type: "thread.turn.start",
-                commandId: yield* serverCommandId("agent-plan-owner-turn-start"),
-                threadId: ownerThreadId,
-                message: {
-                  messageId,
-                  role: "user",
-                  text: prompt,
-                  attachments: [],
-                },
-                modelSelection,
-                titleSeed: ownerThreadTitle,
-                runtimeMode,
-                interactionMode,
-                bootstrap: {
-                  createThread: {
-                    projectId: primaryProject.id,
-                    title: ownerThreadTitle,
-                    modelSelection,
-                    runtimeMode,
-                    interactionMode,
-                    branch: null,
-                    worktreePath: null,
-                    createdAt: now,
-                  },
-                },
-                createdAt: now,
-              }).pipe(Effect.tapError(() => markOwnerPlanningFailed));
-
-              return {
-                planId: plan.id,
-                ownerThreadId,
-                sequence: Math.max(
-                  turnResult.sequence,
-                  updateResult.sequence,
-                  statusResult.sequence,
-                ),
-              };
-            }).pipe(
-              Effect.mapError((cause) =>
-                isOrchestrationDispatchCommandError(cause)
-                  ? cause
-                  : new OrchestrationDispatchCommandError({
-                      message: "Failed to start owner planning",
-                      cause,
-                    }),
-              ),
-            ),
+            agentPlanService.startOwnerPlanning(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeAgentPlan]: (input) =>
@@ -1740,6 +1571,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provide(AgentPlanServiceLive),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(

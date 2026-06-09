@@ -4,7 +4,12 @@ import type {
   AgentSharedUpdate,
   AgentTask,
   CommandId,
+  ModelSelection,
+  OrchestrationDispatchCommandError,
+  ProviderInteractionMode,
   ProjectId,
+  RuntimeMode,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -21,10 +26,26 @@ export interface CreateManualAgentPlanInput {
   readonly createdAt: string;
 }
 
+export interface StartOwnerPlanningInput {
+  readonly planId: AgentPlanId;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly runtimeMode?: RuntimeMode | undefined;
+  readonly interactionMode?: ProviderInteractionMode | undefined;
+}
+
+export interface StartOwnerPlanningResult {
+  readonly planId: AgentPlanId;
+  readonly ownerThreadId: ThreadId;
+  readonly sequence: number;
+}
+
 export interface AgentPlanServiceShape {
   readonly createManualPlan: (
     input: CreateManualAgentPlanInput,
   ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchError>;
+  readonly startOwnerPlanning: (
+    input: StartOwnerPlanningInput,
+  ) => Effect.Effect<StartOwnerPlanningResult, OrchestrationDispatchCommandError>;
   readonly upsertTask: (
     planId: AgentPlanId,
     commandId: CommandId,
