@@ -1951,6 +1951,28 @@ export function selectAgentPlansForEnvironment(
   });
 }
 
+export function selectAgentPlansForProjectRefs(
+  state: AppState,
+  refs: readonly ScopedProjectRef[],
+): AgentPlanSummary[] {
+  if (refs.length === 0) return [];
+  const planIds = new Set<AgentPlanId>();
+  const plans: AgentPlanSummary[] = [];
+  for (const ref of refs) {
+    const environmentState = selectEnvironmentState(state, ref.environmentId);
+    for (const planId of environmentState.agentPlanIds) {
+      if (planIds.has(planId)) continue;
+      const plan = environmentState.agentPlanShellById[planId];
+      if (!plan) continue;
+      const primaryProjectId = plan.primaryProjectId ?? plan.projectIds[0] ?? null;
+      if (primaryProjectId !== ref.projectId) continue;
+      planIds.add(planId);
+      plans.push(plan);
+    }
+  }
+  return plans;
+}
+
 export function selectSidebarThreadsForProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,

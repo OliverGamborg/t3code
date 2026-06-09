@@ -38,6 +38,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  AgentPlanId,
   type ContextMenuItem,
   type DesktopUpdateState,
   ProjectId,
@@ -67,6 +68,8 @@ import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
+  selectAgentPlansAcrossEnvironments,
+  selectAgentPlansForProjectRefs,
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
@@ -191,7 +194,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import type { SidebarThreadSummary } from "../types";
+import type { AgentPlanSummary, SidebarThreadSummary } from "../types";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
@@ -735,12 +738,48 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
+const SidebarAgentPlanRow = memo(function SidebarAgentPlanRow({
+  isActive,
+  onNavigate,
+  plan,
+}: {
+  readonly isActive: boolean;
+  readonly onNavigate: () => void;
+  readonly plan: AgentPlanSummary;
+}) {
+  return (
+    <SidebarMenuSubItem className="group/menu-sub-item relative w-full">
+      <SidebarMenuSubButton
+        render={<Link to="/agent-plans/$planId" params={{ planId: plan.id }} />}
+        size="sm"
+        className={`h-auto min-h-7 w-full translate-x-0 justify-start gap-2 px-2 py-1 text-left ${
+          isActive
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground/75 hover:bg-accent hover:text-foreground"
+        }`}
+        onClick={onNavigate}
+      >
+        <NetworkIcon className="size-3.5 shrink-0 text-emerald-500" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium">{plan.title}</span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground/70">
+            <span className="truncate">{plan.status}</span>
+            <span>{formatRelativeTimeLabel(plan.updatedAt)}</span>
+          </span>
+        </span>
+      </SidebarMenuSubButton>
+    </SidebarMenuSubItem>
+  );
+});
+
 interface SidebarProjectThreadListProps {
   projectKey: string;
   projectExpanded: boolean;
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
+  activeRouteAgentPlanId: AgentPlanId | null;
+  renderedAgentPlans: readonly AgentPlanSummary[];
   renderedThreads: readonly SidebarThreadSummary[];
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
@@ -791,6 +830,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hasOverflowingThreads,
     hiddenThreadStatus,
     orderedProjectThreadKeys,
+    activeRouteAgentPlanId,
+    renderedAgentPlans,
     renderedThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
@@ -820,6 +861,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
+  const { isMobile, setOpenMobile } = useSidebar();
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
@@ -870,6 +912,19 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             />
           );
         })}
+      {shouldShowThreadPanel &&
+        renderedAgentPlans.map((plan) => (
+          <SidebarAgentPlanRow
+            isActive={activeRouteAgentPlanId === plan.id}
+            key={plan.id}
+            onNavigate={() => {
+              if (isMobile) {
+                setOpenMobile(false);
+              }
+            }}
+            plan={plan}
+          />
+        ))}
 
       {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
         <SidebarMenuSubItem className="w-full">
@@ -912,6 +967,7 @@ interface SidebarProjectItemProps {
   project: SidebarProjectSnapshot;
   isThreadListExpanded: boolean;
   activeRouteThreadKey: string | null;
+  activeRouteAgentPlanId: AgentPlanId | null;
   newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
@@ -932,6 +988,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     project,
     isThreadListExpanded,
     activeRouteThreadKey,
+    activeRouteAgentPlanId,
     newThreadShortcutLabel,
     handleNewThread,
     archiveThread,
@@ -1044,6 +1101,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     ),
   );
+  const sidebarAgentPlans = useStore(
+    useShallow(
+      useMemo(
+        () => (state: import("../store").AppState) =>
+          selectAgentPlansForProjectRefs(state, project.memberProjectRefs),
+        [project.memberProjectRefs],
+      ),
+    ),
+  );
   const sidebarThreadByKey = useMemo(
     () =>
       new Map(
@@ -1060,6 +1126,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
   const projectThreads = sidebarThreads;
+  const visibleProjectAgentPlans = useMemo(
+    () =>
+      sidebarAgentPlans.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    [sidebarAgentPlans],
+  );
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
   );
@@ -1160,10 +1231,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ) ?? null
     );
   }, [activeRouteThreadKey, projectExpanded, visibleProjectThreads]);
+  const pinnedCollapsedAgentPlan = useMemo(() => {
+    if (!activeRouteAgentPlanId || projectExpanded) {
+      return null;
+    }
+    return visibleProjectAgentPlans.find((plan) => plan.id === activeRouteAgentPlanId) ?? null;
+  }, [activeRouteAgentPlanId, projectExpanded, visibleProjectAgentPlans]);
 
   const {
     hasOverflowingThreads,
     hiddenThreadStatus,
+    renderedAgentPlans,
     renderedThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
@@ -1209,17 +1287,28 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       hiddenThreadStatus: resolveProjectStatusIndicator(
         hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
+      renderedAgentPlans: pinnedCollapsedAgentPlan
+        ? [pinnedCollapsedAgentPlan]
+        : projectExpanded
+          ? visibleProjectAgentPlans
+          : [],
       renderedThreads,
-      showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
-      shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
+      showEmptyThreadState:
+        projectExpanded &&
+        visibleProjectThreads.length === 0 &&
+        visibleProjectAgentPlans.length === 0,
+      shouldShowThreadPanel:
+        projectExpanded || pinnedCollapsedThread !== null || pinnedCollapsedAgentPlan !== null,
     };
   }, [
     isThreadListExpanded,
+    pinnedCollapsedAgentPlan,
     pinnedCollapsedThread,
     projectExpanded,
     projectThreads,
     sidebarThreadPreviewCount,
     threadLastVisitedAts,
+    visibleProjectAgentPlans,
     visibleProjectThreads,
   ]);
 
@@ -2103,6 +2192,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
+        activeRouteAgentPlanId={activeRouteAgentPlanId}
+        renderedAgentPlans={renderedAgentPlans}
         renderedThreads={renderedThreads}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
@@ -2581,6 +2672,7 @@ interface SidebarProjectsContentProps {
   sortedProjects: readonly SidebarProjectSnapshot[];
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
+  activeRouteAgentPlanId: AgentPlanId | null;
   routeThreadKey: string | null;
   newThreadShortcutLabel: string | null;
   commandPaletteShortcutLabel: string | null;
@@ -2622,6 +2714,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     sortedProjects,
     expandedThreadListsByProject,
     activeRouteProjectKey,
+    activeRouteAgentPlanId,
     routeThreadKey,
     newThreadShortcutLabel,
     commandPaletteShortcutLabel,
@@ -2767,6 +2860,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         activeRouteThreadKey={
                           activeRouteProjectKey === project.projectKey ? routeThreadKey : null
                         }
+                        activeRouteAgentPlanId={activeRouteAgentPlanId}
                         newThreadShortcutLabel={newThreadShortcutLabel}
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
@@ -2799,6 +2893,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 activeRouteThreadKey={
                   activeRouteProjectKey === project.projectKey ? routeThreadKey : null
                 }
+                activeRouteAgentPlanId={activeRouteAgentPlanId}
                 newThreadShortcutLabel={newThreadShortcutLabel}
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}
@@ -2830,6 +2925,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const sidebarAgentPlans = useStore(useShallow(selectAgentPlansAcrossEnvironments));
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -2848,6 +2944,11 @@ export default function Sidebar() {
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
+  });
+  const activeRouteAgentPlanId = useParams({
+    strict: false,
+    select: (params) =>
+      typeof params.planId === "string" ? AgentPlanId.make(params.planId) : null,
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
@@ -2929,20 +3030,34 @@ export default function Sidebar() {
       ),
     [sidebarThreads],
   );
+  const sidebarAgentPlanById = useMemo(
+    () => new Map(sidebarAgentPlans.map((plan) => [plan.id, plan] as const)),
+    [sidebarAgentPlans],
+  );
   // Resolve the active route's project key to a logical key so it matches the
   // sidebar's grouped project entries.
   const activeRouteProjectKey = useMemo(() => {
-    if (!routeThreadKey) {
-      return null;
-    }
-    const activeThread = sidebarThreadByKey.get(routeThreadKey);
-    if (!activeThread) return null;
+    const activeThread = routeThreadKey ? sidebarThreadByKey.get(routeThreadKey) : null;
+    const activePlan = activeRouteAgentPlanId
+      ? (sidebarAgentPlanById.get(activeRouteAgentPlanId) ?? null)
+      : null;
+    const environmentId = activeThread?.environmentId ?? activePlan?.environmentId ?? null;
+    const projectId =
+      activeThread?.projectId ?? activePlan?.primaryProjectId ?? activePlan?.projectIds[0] ?? null;
+    if (!environmentId || !projectId) return null;
+    const scopedProject = scopeProjectRef(environmentId, projectId);
     const physicalKey =
-      projectPhysicalKeyByScopedRef.get(
-        scopedProjectKey(scopeProjectRef(activeThread.environmentId, activeThread.projectId)),
-      ) ?? scopedProjectKey(scopeProjectRef(activeThread.environmentId, activeThread.projectId));
+      projectPhysicalKeyByScopedRef.get(scopedProjectKey(scopedProject)) ??
+      scopedProjectKey(scopedProject);
     return physicalToLogicalKey.get(physicalKey) ?? physicalKey;
-  }, [routeThreadKey, sidebarThreadByKey, physicalToLogicalKey, projectPhysicalKeyByScopedRef]);
+  }, [
+    activeRouteAgentPlanId,
+    routeThreadKey,
+    sidebarAgentPlanById,
+    sidebarThreadByKey,
+    physicalToLogicalKey,
+    projectPhysicalKeyByScopedRef,
+  ]);
 
   // Group threads by logical project key so all threads from grouped projects
   // are displayed together.
@@ -3485,6 +3600,7 @@ export default function Sidebar() {
             sortedProjects={sortedProjects}
             expandedThreadListsByProject={expandedThreadListsByProject}
             activeRouteProjectKey={activeRouteProjectKey}
+            activeRouteAgentPlanId={activeRouteAgentPlanId}
             routeThreadKey={routeThreadKey}
             newThreadShortcutLabel={newThreadShortcutLabel}
             commandPaletteShortcutLabel={commandPaletteShortcutLabel}
