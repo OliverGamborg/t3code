@@ -59,6 +59,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { AgentPlanServiceLive } from "./agentPlans/Layers/AgentPlanService.ts";
 import { AgentPlanService } from "./agentPlans/Services/AgentPlanService.ts";
+import { WorktreeManagerLive } from "./worktrees/Layers/WorktreeManager.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -142,6 +143,11 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getAgentPlan, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.approveAgentPlanTasks, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.startAgentPlanReview, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.subscribeAgentPlan, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
@@ -502,6 +508,8 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           case "agent-task.upserted":
           case "agent-shared-update.appended":
           case "agent-contract.upserted":
+          case "agent-coordination-message.upserted":
+          case "agent-review.upserted":
             return projectionSnapshotQuery.getAgentPlanShellById(event.payload.planId).pipe(
               Effect.map((plan) =>
                 Option.map(plan, (nextPlan) => ({
@@ -980,6 +988,36 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning,
             agentPlanService.startOwnerPlanning(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput,
+            agentPlanService.importOwnerPlanOutput(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.approveAgentPlanTasks]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.approveAgentPlanTasks,
+            agentPlanService.approveAgentPlanTasks(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers,
+            agentPlanService.launchReadyWorkers(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage,
+            agentPlanService.sendWorkerMessage(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.startAgentPlanReview]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.startAgentPlanReview,
+            agentPlanService.startReviewer(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeAgentPlan]: (input) =>
@@ -1571,7 +1609,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(AgentPlanServiceLive),
+              Layer.provide(AgentPlanServiceLive.pipe(Layer.provide(WorktreeManagerLive))),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(

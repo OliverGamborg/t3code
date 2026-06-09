@@ -169,6 +169,21 @@ export interface WsRpcClient {
     readonly startAgentPlanOwnerPlanning: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning
     >;
+    readonly importAgentPlanOwnerOutput: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput
+    >;
+    readonly approveAgentPlanTasks: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.approveAgentPlanTasks
+    >;
+    readonly launchAgentPlanReadyWorkers: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers
+    >;
+    readonly sendAgentPlanWorkerMessage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage
+    >;
+    readonly startAgentPlanReview: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.startAgentPlanReview
+    >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
     readonly subscribeAgentPlan: RpcInputStreamMethod<
@@ -372,6 +387,24 @@ export function createWsRpcClient(
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning](input),
         ),
+      importAgentPlanOwnerOutput: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput](input),
+        ),
+      approveAgentPlanTasks: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.approveAgentPlanTasks](input),
+        ),
+      launchAgentPlanReadyWorkers: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers](input),
+        ),
+      sendAgentPlanWorkerMessage: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage](input),
+        ),
+      startAgentPlanReview: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.startAgentPlanReview](input)),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),

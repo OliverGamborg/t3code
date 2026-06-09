@@ -26,6 +26,8 @@ import {
   AgentTaskUpsertedPayload as ContractsAgentTaskUpsertedPayloadSchema,
   AgentSharedUpdateAppendedPayload as ContractsAgentSharedUpdateAppendedPayloadSchema,
   AgentContractUpsertedPayload as ContractsAgentContractUpsertedPayloadSchema,
+  AgentCoordinationMessageUpsertedPayload as ContractsAgentCoordinationMessageUpsertedPayloadSchema,
+  AgentReviewUpsertedPayload as ContractsAgentReviewUpsertedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -63,3 +65,6 @@ export const AgentPlanStatusChangedPayload = ContractsAgentPlanStatusChangedPayl
 export const AgentTaskUpsertedPayload = ContractsAgentTaskUpsertedPayloadSchema;
 export const AgentSharedUpdateAppendedPayload = ContractsAgentSharedUpdateAppendedPayloadSchema;
 export const AgentContractUpsertedPayload = ContractsAgentContractUpsertedPayloadSchema;
+export const AgentCoordinationMessageUpsertedPayload =
+  ContractsAgentCoordinationMessageUpsertedPayloadSchema;
+export const AgentReviewUpsertedPayload = ContractsAgentReviewUpsertedPayloadSchema;

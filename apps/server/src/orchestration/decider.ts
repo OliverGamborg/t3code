@@ -963,6 +963,60 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "agent-coordination-message.upsert": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.message.planId !== command.planId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Coordination message '${command.message.id}' belongs to plan '${command.message.planId}', not '${command.planId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.message.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-coordination-message.upserted",
+        payload: {
+          planId: command.planId,
+          message: command.message,
+        },
+      };
+    }
+
+    case "agent-review.upsert": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.review.planId !== command.planId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Review '${command.review.id}' belongs to plan '${command.review.planId}', not '${command.planId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.review.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-review.upserted",
+        payload: {
+          planId: command.planId,
+          review: command.review,
+        },
+      };
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

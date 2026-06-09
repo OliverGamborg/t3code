@@ -1,10 +1,12 @@
 import {
   AgentContract,
   AgentContractId,
+  AgentCoordinationMessage,
   AgentPlan,
   AgentPlanDetailSnapshot,
   AgentPlanId,
   AgentPlanShell,
+  AgentReview,
   AgentSharedUpdate,
   AgentTask,
   AgentTaskId,
@@ -128,6 +130,21 @@ const ProjectionAgentContractDbRowSchema = AgentContract.mapFields(
     consumerTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
   }),
 );
+const ProjectionAgentCoordinationMessageDbRowSchema = AgentCoordinationMessage.mapFields(
+  Struct.assign({
+    toTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+    toThreadIds: Schema.fromJsonString(Schema.Array(ThreadId)),
+    requiresResponse: Schema.Number,
+  }),
+);
+const ProjectionAgentReviewDbRowSchema = AgentReview.mapFields(
+  Struct.assign({
+    mergeOrder: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+    requiredFixes: Schema.fromJsonString(Schema.Array(Schema.String)),
+    risks: Schema.fromJsonString(Schema.Array(Schema.String)),
+    testRecommendations: Schema.fromJsonString(Schema.Array(Schema.String)),
+  }),
+);
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
   turnId: TurnId,
@@ -152,6 +169,8 @@ const ProjectionAgentPlanShellMetricsRowSchema = Schema.Struct({
   doneTaskCount: NonNegativeInt,
   contractCount: NonNegativeInt,
   updateCount: NonNegativeInt,
+  coordinationMessageCount: NonNegativeInt,
+  reviewCount: NonNegativeInt,
   latestUpdatedAt: IsoDateTime,
 });
 type ProjectionAgentPlanShellMetricsRow = typeof ProjectionAgentPlanShellMetricsRowSchema.Type;
@@ -305,11 +324,22 @@ function mapProposedPlanRow(
   };
 }
 
+function mapCoordinationMessageRow(
+  row: Schema.Schema.Type<typeof ProjectionAgentCoordinationMessageDbRowSchema>,
+): AgentCoordinationMessage {
+  return {
+    ...row,
+    requiresResponse: row.requiresResponse !== 0,
+  };
+}
+
 function mapAgentPlan(input: {
   readonly row: Schema.Schema.Type<typeof ProjectionAgentPlanDbRowSchema>;
   readonly tasks?: ReadonlyArray<AgentTask>;
   readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
   readonly contracts?: ReadonlyArray<AgentContract>;
+  readonly coordinationMessages?: ReadonlyArray<AgentCoordinationMessage>;
+  readonly reviews?: ReadonlyArray<AgentReview>;
 }): AgentPlan {
   return {
     id: input.row.planId,
@@ -325,6 +355,8 @@ function mapAgentPlan(input: {
     tasks: [...(input.tasks ?? [])],
     sharedUpdates: [...(input.sharedUpdates ?? [])],
     contracts: [...(input.contracts ?? [])],
+    coordinationMessages: [...(input.coordinationMessages ?? [])],
+    reviews: [...(input.reviews ?? [])],
   };
 }
 
@@ -333,6 +365,8 @@ function mapAgentPlanShell(input: {
   readonly tasks?: ReadonlyArray<AgentTask>;
   readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
   readonly contracts?: ReadonlyArray<AgentContract>;
+  readonly coordinationMessages?: ReadonlyArray<AgentCoordinationMessage>;
+  readonly reviews?: ReadonlyArray<AgentReview>;
   readonly metrics?: ProjectionAgentPlanShellMetricsRow;
 }): AgentPlanShell {
   const tasks = input.tasks ?? [];
@@ -352,6 +386,9 @@ function mapAgentPlanShell(input: {
     doneTaskCount: metrics?.doneTaskCount ?? tasks.filter((task) => task.status === "done").length,
     contractCount: metrics?.contractCount ?? input.contracts?.length ?? 0,
     updateCount: metrics?.updateCount ?? input.sharedUpdates?.length ?? 0,
+    coordinationMessageCount:
+      metrics?.coordinationMessageCount ?? input.coordinationMessages?.length ?? 0,
+    reviewCount: metrics?.reviewCount ?? input.reviews?.length ?? 0,
     createdAt: input.row.createdAt,
     updatedAt: metrics?.latestUpdatedAt ?? input.row.updatedAt,
   };
@@ -817,11 +854,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           COALESCE(t.done_task_count, 0) AS "doneTaskCount",
           COALESCE(c.contract_count, 0) AS "contractCount",
           COALESCE(u.update_count, 0) AS "updateCount",
+          COALESCE(m.coordination_message_count, 0) AS "coordinationMessageCount",
+          COALESCE(r.review_count, 0) AS "reviewCount",
           MAX(
             p.updated_at,
             COALESCE(t.latest_updated_at, p.updated_at),
             COALESCE(c.latest_updated_at, p.updated_at),
-            COALESCE(u.latest_updated_at, p.updated_at)
+            COALESCE(u.latest_updated_at, p.updated_at),
+            COALESCE(m.latest_updated_at, p.updated_at),
+            COALESCE(r.latest_updated_at, p.updated_at)
           ) AS "latestUpdatedAt"
         FROM projection_agent_plans p
         LEFT JOIN (
@@ -851,6 +892,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_agent_shared_updates
           GROUP BY plan_id
         ) u ON u.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS coordination_message_count,
+            MAX(created_at) AS latest_updated_at
+          FROM projection_agent_coordination_messages
+          GROUP BY plan_id
+        ) m ON m.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS review_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_reviews
+          GROUP BY plan_id
+        ) r ON r.plan_id = p.plan_id
         WHERE p.deleted_at IS NULL
         ORDER BY p.updated_at DESC, p.plan_id ASC
       `,
@@ -869,11 +926,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           COALESCE(t.done_task_count, 0) AS "doneTaskCount",
           COALESCE(c.contract_count, 0) AS "contractCount",
           COALESCE(u.update_count, 0) AS "updateCount",
+          COALESCE(m.coordination_message_count, 0) AS "coordinationMessageCount",
+          COALESCE(r.review_count, 0) AS "reviewCount",
           MAX(
             p.updated_at,
             COALESCE(t.latest_updated_at, p.updated_at),
             COALESCE(c.latest_updated_at, p.updated_at),
-            COALESCE(u.latest_updated_at, p.updated_at)
+            COALESCE(u.latest_updated_at, p.updated_at),
+            COALESCE(m.latest_updated_at, p.updated_at),
+            COALESCE(r.latest_updated_at, p.updated_at)
           ) AS "latestUpdatedAt"
         FROM projection_agent_plans p
         LEFT JOIN (
@@ -903,6 +964,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_agent_shared_updates
           GROUP BY plan_id
         ) u ON u.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS coordination_message_count,
+            MAX(created_at) AS latest_updated_at
+          FROM projection_agent_coordination_messages
+          GROUP BY plan_id
+        ) m ON m.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS review_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_reviews
+          GROUP BY plan_id
+        ) r ON r.plan_id = p.plan_id
         WHERE p.plan_id = ${planId}
           AND p.deleted_at IS NULL
         LIMIT 1
@@ -1078,6 +1155,64 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_agent_contracts
         WHERE plan_id = ${planId}
         ORDER BY created_at ASC, contract_id ASC
+      `,
+  });
+
+  const listAgentCoordinationMessageRowsByPlan = SqlSchema.findAll({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentCoordinationMessageDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          message_id AS "id",
+          plan_id AS "planId",
+          dedupe_key AS "dedupeKey",
+          kind,
+          status,
+          from_role AS "fromRole",
+          from_task_id AS "fromTaskId",
+          from_thread_id AS "fromThreadId",
+          to_target AS "toTarget",
+          to_task_ids_json AS "toTaskIds",
+          to_thread_ids_json AS "toThreadIds",
+          source_message_id AS "sourceMessageId",
+          source_turn_id AS "sourceTurnId",
+          correlation_id AS "correlationId",
+          title,
+          body,
+          requires_response AS "requiresResponse",
+          delivery_attempts AS "deliveryAttempts",
+          created_at AS "createdAt",
+          sent_at AS "sentAt",
+          acknowledged_at AS "acknowledgedAt",
+          failed_at AS "failedAt",
+          failure_reason AS "failureReason"
+        FROM projection_agent_coordination_messages
+        WHERE plan_id = ${planId}
+        ORDER BY created_at ASC, message_id ASC
+      `,
+  });
+
+  const listAgentReviewRowsByPlan = SqlSchema.findAll({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentReviewDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          review_id AS "id",
+          plan_id AS "planId",
+          reviewer_thread_id AS "reviewerThreadId",
+          status,
+          summary,
+          merge_order_json AS "mergeOrder",
+          required_fixes_json AS "requiredFixes",
+          risks_json AS "risks",
+          test_recommendations_json AS "testRecommendations",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_agent_reviews
+        WHERE plan_id = ${planId}
+        ORDER BY created_at ASC, review_id ASC
       `,
   });
 
@@ -2694,7 +2829,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getAgentPlanDetailById: ProjectionSnapshotQueryShape["getAgentPlanDetailById"] = (planId) =>
     Effect.gen(function* () {
-      const [planRow, taskRows, sharedUpdateRows, contractRows, stateRows] = yield* Effect.all([
+      const [
+        planRow,
+        taskRows,
+        sharedUpdateRows,
+        contractRows,
+        coordinationMessageRows,
+        reviewRows,
+        stateRows,
+      ] = yield* Effect.all([
         getActiveAgentPlanRowById({ planId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2727,6 +2870,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
+        listAgentCoordinationMessageRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listCoordinationMessages:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listCoordinationMessages:decodeRows",
+            ),
+          ),
+        ),
+        listAgentReviewRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listReviews:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listReviews:decodeRows",
+            ),
+          ),
+        ),
         listProjectionStateRows(undefined).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2747,6 +2906,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           tasks: taskRows,
           sharedUpdates: sharedUpdateRows,
           contracts: contractRows,
+          coordinationMessages: coordinationMessageRows.map(mapCoordinationMessageRow),
+          reviews: reviewRows,
         }),
       ).pipe(
         Effect.mapError(

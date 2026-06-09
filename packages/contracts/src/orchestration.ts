@@ -8,6 +8,8 @@ import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import {
   AgentPlanId,
+  AgentReviewId,
+  AgentTaskId,
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
@@ -24,10 +26,12 @@ import {
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   AgentContract,
+  AgentCoordinationMessage,
   AgentPlan,
   AgentPlanDetailSnapshot,
   AgentPlanShell,
   AgentPlanStatus,
+  AgentReview,
   AgentSharedUpdate,
   AgentTask,
 } from "./agentPlan.ts";
@@ -42,6 +46,11 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
   getAgentPlan: "orchestration.getAgentPlan",
   startAgentPlanOwnerPlanning: "orchestration.startAgentPlanOwnerPlanning",
+  importAgentPlanOwnerOutput: "orchestration.importAgentPlanOwnerOutput",
+  approveAgentPlanTasks: "orchestration.approveAgentPlanTasks",
+  launchAgentPlanReadyWorkers: "orchestration.launchAgentPlanReadyWorkers",
+  sendAgentPlanWorkerMessage: "orchestration.sendAgentPlanWorkerMessage",
+  startAgentPlanReview: "orchestration.startAgentPlanReview",
   subscribeAgentPlan: "orchestration.subscribeAgentPlan",
 } as const;
 
@@ -729,6 +738,20 @@ const AgentContractUpsertCommand = Schema.Struct({
   contract: AgentContract,
 });
 
+const AgentCoordinationMessageUpsertCommand = Schema.Struct({
+  type: Schema.Literal("agent-coordination-message.upsert"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  message: AgentCoordinationMessage,
+});
+
+const AgentReviewUpsertCommand = Schema.Struct({
+  type: Schema.Literal("agent-review.upsert"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  review: AgentReview,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -752,6 +775,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   AgentTaskUpsertCommand,
   AgentSharedUpdateAppendCommand,
   AgentContractUpsertCommand,
+  AgentCoordinationMessageUpsertCommand,
+  AgentReviewUpsertCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -779,6 +804,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   AgentTaskUpsertCommand,
   AgentSharedUpdateAppendCommand,
   AgentContractUpsertCommand,
+  AgentCoordinationMessageUpsertCommand,
+  AgentReviewUpsertCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -893,6 +920,8 @@ export const OrchestrationEventType = Schema.Literals([
   "agent-task.upserted",
   "agent-shared-update.appended",
   "agent-contract.upserted",
+  "agent-coordination-message.upserted",
+  "agent-review.upserted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1110,6 +1139,16 @@ export const AgentContractUpsertedPayload = Schema.Struct({
   contract: AgentContract,
 });
 
+export const AgentCoordinationMessageUpsertedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  message: AgentCoordinationMessage,
+});
+
+export const AgentReviewUpsertedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  review: AgentReview,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -1272,6 +1311,16 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("agent-contract.upserted"),
     payload: AgentContractUpsertedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-coordination-message.upserted"),
+    payload: AgentCoordinationMessageUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-review.upserted"),
+    payload: AgentReviewUpsertedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -1413,6 +1462,86 @@ export const OrchestrationStartAgentPlanOwnerPlanningResult = Schema.Struct({
 export type OrchestrationStartAgentPlanOwnerPlanningResult =
   typeof OrchestrationStartAgentPlanOwnerPlanningResult.Type;
 
+export const OrchestrationImportAgentPlanOwnerOutputInput = Schema.Struct({
+  planId: AgentPlanId,
+  source: Schema.optional(Schema.Literals(["latest_owner_message", "provided_json"])),
+  ownerMessageId: Schema.optional(MessageId),
+  jsonText: Schema.optional(Schema.String),
+  replaceDraft: Schema.optional(Schema.Boolean),
+});
+export type OrchestrationImportAgentPlanOwnerOutputInput =
+  typeof OrchestrationImportAgentPlanOwnerOutputInput.Type;
+
+export const OrchestrationImportAgentPlanOwnerOutputResult = Schema.Struct({
+  planId: AgentPlanId,
+  taskCount: NonNegativeInt,
+  contractCount: NonNegativeInt,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationImportAgentPlanOwnerOutputResult =
+  typeof OrchestrationImportAgentPlanOwnerOutputResult.Type;
+
+export const OrchestrationApproveAgentPlanTasksInput = Schema.Struct({
+  planId: AgentPlanId,
+  taskIds: Schema.optional(Schema.Array(AgentTaskId)),
+  launch: Schema.optional(Schema.Boolean),
+  allowPathOverlaps: Schema.optional(Schema.Boolean),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
+  interactionMode: Schema.optional(ProviderInteractionMode),
+});
+export type OrchestrationApproveAgentPlanTasksInput =
+  typeof OrchestrationApproveAgentPlanTasksInput.Type;
+
+export const OrchestrationLaunchAgentPlanReadyWorkersInput = Schema.Struct({
+  planId: AgentPlanId,
+  taskIds: Schema.optional(Schema.Array(AgentTaskId)),
+  reason: Schema.optional(Schema.Literals(["approval", "dependency_completed", "retry"])),
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
+  interactionMode: Schema.optional(ProviderInteractionMode),
+});
+export type OrchestrationLaunchAgentPlanReadyWorkersInput =
+  typeof OrchestrationLaunchAgentPlanReadyWorkersInput.Type;
+
+export const OrchestrationLaunchAgentPlanReadyWorkersResult = Schema.Struct({
+  planId: AgentPlanId,
+  launchedTaskIds: Schema.Array(AgentTaskId),
+  skippedTaskIds: Schema.Array(AgentTaskId),
+  sequence: NonNegativeInt,
+});
+export type OrchestrationLaunchAgentPlanReadyWorkersResult =
+  typeof OrchestrationLaunchAgentPlanReadyWorkersResult.Type;
+
+export const OrchestrationSendAgentPlanWorkerMessageInput = Schema.Struct({
+  planId: AgentPlanId,
+  taskId: AgentTaskId,
+  kind: Schema.Literals(["progress_request", "assignment", "clarification_response", "sync"]),
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  requiresResponse: Schema.optional(Schema.Boolean),
+});
+export type OrchestrationSendAgentPlanWorkerMessageInput =
+  typeof OrchestrationSendAgentPlanWorkerMessageInput.Type;
+
+export const OrchestrationStartAgentPlanReviewInput = Schema.Struct({
+  planId: AgentPlanId,
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
+  interactionMode: Schema.optional(ProviderInteractionMode),
+});
+export type OrchestrationStartAgentPlanReviewInput =
+  typeof OrchestrationStartAgentPlanReviewInput.Type;
+
+export const OrchestrationStartAgentPlanReviewResult = Schema.Struct({
+  planId: AgentPlanId,
+  reviewId: AgentReviewId,
+  reviewerThreadId: ThreadId,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationStartAgentPlanReviewResult =
+  typeof OrchestrationStartAgentPlanReviewResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1441,6 +1570,26 @@ export const OrchestrationRpcSchemas = {
   startAgentPlanOwnerPlanning: {
     input: OrchestrationStartAgentPlanOwnerPlanningInput,
     output: OrchestrationStartAgentPlanOwnerPlanningResult,
+  },
+  importAgentPlanOwnerOutput: {
+    input: OrchestrationImportAgentPlanOwnerOutputInput,
+    output: OrchestrationImportAgentPlanOwnerOutputResult,
+  },
+  approveAgentPlanTasks: {
+    input: OrchestrationApproveAgentPlanTasksInput,
+    output: OrchestrationLaunchAgentPlanReadyWorkersResult,
+  },
+  launchAgentPlanReadyWorkers: {
+    input: OrchestrationLaunchAgentPlanReadyWorkersInput,
+    output: OrchestrationLaunchAgentPlanReadyWorkersResult,
+  },
+  sendAgentPlanWorkerMessage: {
+    input: OrchestrationSendAgentPlanWorkerMessageInput,
+    output: DispatchResult,
+  },
+  startAgentPlanReview: {
+    input: OrchestrationStartAgentPlanReviewInput,
+    output: OrchestrationStartAgentPlanReviewResult,
   },
   subscribeAgentPlan: {
     input: OrchestrationSubscribeAgentPlanInput,

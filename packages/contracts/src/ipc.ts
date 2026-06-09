@@ -56,10 +56,18 @@ import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from ".
 import * as Schema from "effect/Schema";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationApproveAgentPlanTasksInput,
   OrchestrationGetAgentPlanInput,
   OrchestrationGetAgentPlanResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationImportAgentPlanOwnerOutputInput,
+  OrchestrationImportAgentPlanOwnerOutputResult,
+  OrchestrationLaunchAgentPlanReadyWorkersInput,
+  OrchestrationLaunchAgentPlanReadyWorkersResult,
+  OrchestrationSendAgentPlanWorkerMessageInput,
+  OrchestrationStartAgentPlanReviewInput,
+  OrchestrationStartAgentPlanReviewResult,
   OrchestrationStartAgentPlanOwnerPlanningInput,
   OrchestrationStartAgentPlanOwnerPlanningResult,
   OrchestrationGetTurnDiffInput,
@@ -617,6 +625,21 @@ export interface EnvironmentApi {
     startAgentPlanOwnerPlanning: (
       input: OrchestrationStartAgentPlanOwnerPlanningInput,
     ) => Promise<OrchestrationStartAgentPlanOwnerPlanningResult>;
+    importAgentPlanOwnerOutput: (
+      input: OrchestrationImportAgentPlanOwnerOutputInput,
+    ) => Promise<OrchestrationImportAgentPlanOwnerOutputResult>;
+    approveAgentPlanTasks: (
+      input: OrchestrationApproveAgentPlanTasksInput,
+    ) => Promise<OrchestrationLaunchAgentPlanReadyWorkersResult>;
+    launchAgentPlanReadyWorkers: (
+      input: OrchestrationLaunchAgentPlanReadyWorkersInput,
+    ) => Promise<OrchestrationLaunchAgentPlanReadyWorkersResult>;
+    sendAgentPlanWorkerMessage: (
+      input: OrchestrationSendAgentPlanWorkerMessageInput,
+    ) => Promise<{ sequence: number }>;
+    startAgentPlanReview: (
+      input: OrchestrationStartAgentPlanReviewInput,
+    ) => Promise<OrchestrationStartAgentPlanReviewResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {

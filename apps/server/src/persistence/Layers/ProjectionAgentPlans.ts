@@ -1,4 +1,11 @@
-import { AgentContract, AgentSharedUpdate, AgentTask, ProjectId } from "@t3tools/contracts";
+import {
+  AgentContract,
+  AgentCoordinationMessage,
+  AgentReview,
+  AgentSharedUpdate,
+  AgentTask,
+  ProjectId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -237,6 +244,130 @@ const makeProjectionAgentPlanRepository = Effect.gen(function* () {
     `,
   });
 
+  const upsertProjectionAgentCoordinationMessageRow = SqlSchema.void({
+    Request: AgentCoordinationMessage,
+    execute: (message) => sql`
+      INSERT INTO projection_agent_coordination_messages (
+        message_id,
+        plan_id,
+        dedupe_key,
+        kind,
+        status,
+        from_role,
+        from_task_id,
+        from_thread_id,
+        to_target,
+        to_task_ids_json,
+        to_thread_ids_json,
+        source_message_id,
+        source_turn_id,
+        correlation_id,
+        title,
+        body,
+        requires_response,
+        delivery_attempts,
+        created_at,
+        sent_at,
+        acknowledged_at,
+        failed_at,
+        failure_reason
+      )
+      VALUES (
+        ${message.id},
+        ${message.planId},
+        ${message.dedupeKey},
+        ${message.kind},
+        ${message.status},
+        ${message.fromRole},
+        ${message.fromTaskId},
+        ${message.fromThreadId},
+        ${message.toTarget},
+        ${JSON.stringify(message.toTaskIds)},
+        ${JSON.stringify(message.toThreadIds)},
+        ${message.sourceMessageId},
+        ${message.sourceTurnId},
+        ${message.correlationId},
+        ${message.title},
+        ${message.body},
+        ${message.requiresResponse ? 1 : 0},
+        ${message.deliveryAttempts},
+        ${message.createdAt},
+        ${message.sentAt},
+        ${message.acknowledgedAt},
+        ${message.failedAt},
+        ${message.failureReason}
+      )
+      ON CONFLICT (message_id)
+      DO UPDATE SET
+        plan_id = excluded.plan_id,
+        dedupe_key = excluded.dedupe_key,
+        kind = excluded.kind,
+        status = excluded.status,
+        from_role = excluded.from_role,
+        from_task_id = excluded.from_task_id,
+        from_thread_id = excluded.from_thread_id,
+        to_target = excluded.to_target,
+        to_task_ids_json = excluded.to_task_ids_json,
+        to_thread_ids_json = excluded.to_thread_ids_json,
+        source_message_id = excluded.source_message_id,
+        source_turn_id = excluded.source_turn_id,
+        correlation_id = excluded.correlation_id,
+        title = excluded.title,
+        body = excluded.body,
+        requires_response = excluded.requires_response,
+        delivery_attempts = excluded.delivery_attempts,
+        created_at = excluded.created_at,
+        sent_at = excluded.sent_at,
+        acknowledged_at = excluded.acknowledged_at,
+        failed_at = excluded.failed_at,
+        failure_reason = excluded.failure_reason
+    `,
+  });
+
+  const upsertProjectionAgentReviewRow = SqlSchema.void({
+    Request: AgentReview,
+    execute: (review) => sql`
+      INSERT INTO projection_agent_reviews (
+        review_id,
+        plan_id,
+        reviewer_thread_id,
+        status,
+        summary,
+        merge_order_json,
+        required_fixes_json,
+        risks_json,
+        test_recommendations_json,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${review.id},
+        ${review.planId},
+        ${review.reviewerThreadId},
+        ${review.status},
+        ${review.summary},
+        ${JSON.stringify(review.mergeOrder)},
+        ${JSON.stringify(review.requiredFixes)},
+        ${JSON.stringify(review.risks)},
+        ${JSON.stringify(review.testRecommendations)},
+        ${review.createdAt},
+        ${review.updatedAt}
+      )
+      ON CONFLICT (review_id)
+      DO UPDATE SET
+        plan_id = excluded.plan_id,
+        reviewer_thread_id = excluded.reviewer_thread_id,
+        status = excluded.status,
+        summary = excluded.summary,
+        merge_order_json = excluded.merge_order_json,
+        required_fixes_json = excluded.required_fixes_json,
+        risks_json = excluded.risks_json,
+        test_recommendations_json = excluded.test_recommendations_json,
+        created_at = excluded.created_at,
+        updated_at = excluded.updated_at
+    `,
+  });
+
   const upsertPlan: ProjectionAgentPlanRepositoryShape["upsertPlan"] = (row) =>
     upsertProjectionAgentPlanRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionAgentPlanRepository.upsertPlan:query")),
@@ -264,12 +395,27 @@ const makeProjectionAgentPlanRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionAgentPlanRepository.upsertContract:query")),
     );
 
+  const upsertCoordinationMessage: ProjectionAgentPlanRepositoryShape["upsertCoordinationMessage"] =
+    (message) =>
+      upsertProjectionAgentCoordinationMessageRow(message).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionAgentPlanRepository.upsertCoordinationMessage:query"),
+        ),
+      );
+
+  const upsertReview: ProjectionAgentPlanRepositoryShape["upsertReview"] = (review) =>
+    upsertProjectionAgentReviewRow(review).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionAgentPlanRepository.upsertReview:query")),
+    );
+
   return {
     upsertPlan,
     getPlanById,
     upsertTask,
     upsertSharedUpdate,
     upsertContract,
+    upsertCoordinationMessage,
+    upsertReview,
   } satisfies ProjectionAgentPlanRepositoryShape;
 });
 

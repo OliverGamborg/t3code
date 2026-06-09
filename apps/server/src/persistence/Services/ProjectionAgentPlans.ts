@@ -1,7 +1,9 @@
 import {
   AgentContract,
+  AgentCoordinationMessage,
   AgentPlanId,
   AgentPlanStatus,
+  AgentReview,
   AgentSharedUpdate,
   AgentTask,
   IsoDateTime,
@@ -46,6 +48,10 @@ export interface ProjectionAgentPlanRepositoryShape {
   readonly upsertContract: (
     contract: AgentContract,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly upsertCoordinationMessage: (
+    message: AgentCoordinationMessage,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly upsertReview: (review: AgentReview) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 export class ProjectionAgentPlanRepository extends Context.Service<

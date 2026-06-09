@@ -31,6 +31,7 @@ import {
 } from "../../serverRuntimeStartup.ts";
 import { AgentPlanServiceLive } from "./AgentPlanService.ts";
 import { AgentPlanService } from "../Services/AgentPlanService.ts";
+import { WorktreeManager } from "../../worktrees/Services/WorktreeManager.ts";
 
 const PLAN_ID = AgentPlanId.make("agent-plan-owner");
 const PROJECT_ID = ProjectId.make("project-owner");
@@ -73,6 +74,8 @@ function makePlan(
       tasks: [],
       sharedUpdates: [],
       contracts: [],
+      coordinationMessages: [],
+      reviews: [],
       ...overrides,
     },
   };
@@ -154,10 +157,15 @@ function makeHarness(
     markHttpListening: Effect.void,
     enqueueCommand: (effect) => effect,
   };
+  const worktrees: WorktreeManager["Service"] = {
+    createForAgentTask: () => Effect.die("createForAgentTask should not be called in this test"),
+    removeForAgentTask: () => Effect.die("removeForAgentTask should not be called in this test"),
+  };
   const layer = AgentPlanServiceLive.pipe(
     Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
     Layer.provide(Layer.succeed(ProjectionSnapshotQuery, makeProjectionQuery(input))),
     Layer.provide(Layer.succeed(ServerRuntimeStartup, startup)),
+    Layer.provide(Layer.succeed(WorktreeManager, worktrees)),
     Layer.provideMerge(NodeServices.layer),
   );
   return { dispatchCalls, layer };

@@ -1566,6 +1566,34 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "agent-coordination-message.upserted": {
+          yield* projectionAgentPlanRepository.upsertCoordinationMessage(event.payload.message);
+          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
+            planId: event.payload.planId,
+          });
+          if (Option.isSome(existingRow)) {
+            yield* projectionAgentPlanRepository.upsertPlan({
+              ...existingRow.value,
+              updatedAt: event.payload.message.createdAt,
+            });
+          }
+          return;
+        }
+
+        case "agent-review.upserted": {
+          yield* projectionAgentPlanRepository.upsertReview(event.payload.review);
+          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
+            planId: event.payload.planId,
+          });
+          if (Option.isSome(existingRow)) {
+            yield* projectionAgentPlanRepository.upsertPlan({
+              ...existingRow.value,
+              updatedAt: event.payload.review.updatedAt,
+            });
+          }
+          return;
+        }
+
         default:
           return;
       }

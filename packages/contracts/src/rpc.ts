@@ -57,6 +57,11 @@ import {
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
+  OrchestrationApproveAgentPlanTasksInput,
+  OrchestrationImportAgentPlanOwnerOutputInput,
+  OrchestrationLaunchAgentPlanReadyWorkersInput,
+  OrchestrationSendAgentPlanWorkerMessageInput,
+  OrchestrationStartAgentPlanReviewInput,
   OrchestrationStartAgentPlanOwnerPlanningInput,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -510,6 +515,51 @@ export const WsOrchestrationStartAgentPlanOwnerPlanningRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationImportAgentPlanOwnerOutputRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput,
+  {
+    payload: OrchestrationImportAgentPlanOwnerOutputInput,
+    success: OrchestrationRpcSchemas.importAgentPlanOwnerOutput.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOrchestrationApproveAgentPlanTasksRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.approveAgentPlanTasks,
+  {
+    payload: OrchestrationApproveAgentPlanTasksInput,
+    success: OrchestrationRpcSchemas.approveAgentPlanTasks.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOrchestrationLaunchAgentPlanReadyWorkersRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers,
+  {
+    payload: OrchestrationLaunchAgentPlanReadyWorkersInput,
+    success: OrchestrationRpcSchemas.launchAgentPlanReadyWorkers.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOrchestrationSendAgentPlanWorkerMessageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage,
+  {
+    payload: OrchestrationSendAgentPlanWorkerMessageInput,
+    success: OrchestrationRpcSchemas.sendAgentPlanWorkerMessage.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsOrchestrationStartAgentPlanReviewRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.startAgentPlanReview,
+  {
+    payload: OrchestrationStartAgentPlanReviewInput,
+    success: OrchestrationRpcSchemas.startAgentPlanReview.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationSubscribeAgentPlanRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.subscribeAgentPlan,
   {
@@ -626,6 +676,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationGetAgentPlanRpc,
   WsOrchestrationStartAgentPlanOwnerPlanningRpc,
+  WsOrchestrationImportAgentPlanOwnerOutputRpc,
+  WsOrchestrationApproveAgentPlanTasksRpc,
+  WsOrchestrationLaunchAgentPlanReadyWorkersRpc,
+  WsOrchestrationSendAgentPlanWorkerMessageRpc,
+  WsOrchestrationStartAgentPlanReviewRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationSubscribeAgentPlanRpc,

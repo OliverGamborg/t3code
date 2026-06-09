@@ -75,6 +75,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "agent-task.upsert":
     case "agent-shared-update.append":
     case "agent-contract.upsert":
+    case "agent-coordination-message.upsert":
+    case "agent-review.upsert":
       return {
         aggregateKind: "agent-plan",
         aggregateId: command.planId,

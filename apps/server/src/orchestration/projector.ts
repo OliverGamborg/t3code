@@ -1,7 +1,9 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import {
   AgentContract,
+  AgentCoordinationMessage,
   AgentPlan,
+  AgentReview,
   AgentSharedUpdate,
   AgentTask,
   OrchestrationCheckpointSummary,
@@ -20,7 +22,9 @@ import {
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
   AgentContractUpsertedPayload,
+  AgentCoordinationMessageUpsertedPayload,
   AgentPlanCreatedPayload,
+  AgentReviewUpsertedPayload,
   AgentPlanStatusChangedPayload,
   AgentPlanUpdatedPayload,
   AgentSharedUpdateAppendedPayload,
@@ -45,6 +49,8 @@ const MAX_THREAD_CHECKPOINTS = 500;
 const MAX_AGENT_PLAN_TASKS = 500;
 const MAX_AGENT_PLAN_UPDATES = 1_000;
 const MAX_AGENT_PLAN_CONTRACTS = 500;
+const MAX_AGENT_PLAN_COORDINATION_MESSAGES = 2_000;
+const MAX_AGENT_PLAN_REVIEWS = 100;
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -739,6 +745,8 @@ export function projectEvent(
             tasks: [],
             sharedUpdates: [],
             contracts: [],
+            coordinationMessages: [],
+            reviews: [],
           },
           event.type,
           "plan",
@@ -870,6 +878,65 @@ export function projectEvent(
             agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
               contracts,
               updatedAt: payload.contract.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "agent-coordination-message.upserted":
+      return decodeForEvent(
+        AgentCoordinationMessageUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const plan = nextBase.agentPlans.find((entry) => entry.id === payload.planId);
+          if (!plan) {
+            return nextBase;
+          }
+          const coordinationMessages = [
+            ...plan.coordinationMessages.filter((entry) => entry.id !== payload.message.id),
+            payload.message,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(
+              -MAX_AGENT_PLAN_COORDINATION_MESSAGES,
+            ) as ReadonlyArray<AgentCoordinationMessage>;
+          return {
+            ...nextBase,
+            agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+              coordinationMessages,
+              updatedAt: payload.message.createdAt,
+            }),
+          };
+        }),
+      );
+
+    case "agent-review.upserted":
+      return decodeForEvent(AgentReviewUpsertedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const plan = nextBase.agentPlans.find((entry) => entry.id === payload.planId);
+          if (!plan) {
+            return nextBase;
+          }
+          const reviews = [
+            ...plan.reviews.filter((entry) => entry.id !== payload.review.id),
+            payload.review,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(-MAX_AGENT_PLAN_REVIEWS) as ReadonlyArray<AgentReview>;
+          return {
+            ...nextBase,
+            agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+              reviews,
+              updatedAt: payload.review.updatedAt,
             }),
           };
         }),

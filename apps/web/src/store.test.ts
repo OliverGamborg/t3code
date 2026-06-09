@@ -516,6 +516,8 @@ describe("incremental orchestration updates", () => {
           doneTaskCount: 1,
           contractCount: 1,
           updateCount: 3,
+          coordinationMessageCount: 0,
+          reviewCount: 0,
           createdAt: "2026-02-27T00:00:00.000Z",
           updatedAt: "2026-02-27T00:00:01.000Z",
         },
