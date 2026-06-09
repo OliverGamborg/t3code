@@ -39,6 +39,10 @@ function createTestClient(config?: { readonly emitInitialSnapshot?: boolean }) {
       dispatchCommand: vi.fn(async () => undefined),
       getTurnDiff: vi.fn(async () => undefined),
       getFullThreadDiff: vi.fn(async () => undefined),
+      getArchivedShellSnapshot: vi.fn(async () => undefined),
+      getAgentPlan: vi.fn(async () => undefined),
+      startAgentPlanOwnerPlanning: vi.fn(async () => undefined),
+      subscribeAgentPlan: vi.fn(() => () => undefined),
       subscribeShell: vi.fn(
         (listener: (event: any) => void, options?: { onResubscribe?: () => void }) => {
           shellListeners.add(listener);

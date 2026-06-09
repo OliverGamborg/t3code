@@ -105,10 +105,14 @@ const rpcClientMock = {
     dispatchCommand: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
+    getArchivedShellSnapshot: vi.fn(),
+    getAgentPlan: vi.fn(),
+    startAgentPlanOwnerPlanning: vi.fn(),
     subscribeShell: vi.fn((listener: (event: OrchestrationShellStreamItem) => void) =>
       registerListener(shellStreamListeners, listener),
     ),
     subscribeThread: vi.fn(() => () => undefined),
+    subscribeAgentPlan: vi.fn(() => () => undefined),
   },
 };
 

@@ -57,6 +57,7 @@ import {
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
+  OrchestrationStartAgentPlanOwnerPlanningInput,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -500,6 +501,15 @@ export const WsOrchestrationGetAgentPlanRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
 });
 
+export const WsOrchestrationStartAgentPlanOwnerPlanningRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning,
+  {
+    payload: OrchestrationStartAgentPlanOwnerPlanningInput,
+    success: OrchestrationRpcSchemas.startAgentPlanOwnerPlanning.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationSubscribeAgentPlanRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.subscribeAgentPlan,
   {
@@ -615,6 +625,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationGetAgentPlanRpc,
+  WsOrchestrationStartAgentPlanOwnerPlanningRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationSubscribeAgentPlanRpc,

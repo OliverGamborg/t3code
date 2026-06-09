@@ -144,6 +144,17 @@ const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
   threadCount: Schema.Number,
 });
+const ProjectionAgentPlanShellMetricsRowSchema = Schema.Struct({
+  planId: AgentPlanId,
+  taskCount: NonNegativeInt,
+  runningTaskCount: NonNegativeInt,
+  blockedTaskCount: NonNegativeInt,
+  doneTaskCount: NonNegativeInt,
+  contractCount: NonNegativeInt,
+  updateCount: NonNegativeInt,
+  latestUpdatedAt: IsoDateTime,
+});
+type ProjectionAgentPlanShellMetricsRow = typeof ProjectionAgentPlanShellMetricsRowSchema.Type;
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
 });
@@ -322,8 +333,10 @@ function mapAgentPlanShell(input: {
   readonly tasks?: ReadonlyArray<AgentTask>;
   readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
   readonly contracts?: ReadonlyArray<AgentContract>;
+  readonly metrics?: ProjectionAgentPlanShellMetricsRow;
 }): AgentPlanShell {
   const tasks = input.tasks ?? [];
+  const metrics = input.metrics;
   return {
     id: input.row.planId,
     title: input.row.title,
@@ -331,14 +344,16 @@ function mapAgentPlanShell(input: {
     projectIds: input.row.projectIds,
     primaryProjectId: input.row.primaryProjectId,
     ownerThreadId: input.row.ownerThreadId,
-    taskCount: tasks.length,
-    runningTaskCount: tasks.filter((task) => task.status === "running").length,
-    blockedTaskCount: tasks.filter((task) => task.status === "blocked").length,
-    doneTaskCount: tasks.filter((task) => task.status === "done").length,
-    contractCount: input.contracts?.length ?? 0,
-    updateCount: input.sharedUpdates?.length ?? 0,
+    taskCount: metrics?.taskCount ?? tasks.length,
+    runningTaskCount:
+      metrics?.runningTaskCount ?? tasks.filter((task) => task.status === "running").length,
+    blockedTaskCount:
+      metrics?.blockedTaskCount ?? tasks.filter((task) => task.status === "blocked").length,
+    doneTaskCount: metrics?.doneTaskCount ?? tasks.filter((task) => task.status === "done").length,
+    contractCount: metrics?.contractCount ?? input.contracts?.length ?? 0,
+    updateCount: metrics?.updateCount ?? input.sharedUpdates?.length ?? 0,
     createdAt: input.row.createdAt,
-    updatedAt: input.row.updatedAt,
+    updatedAt: metrics?.latestUpdatedAt ?? input.row.updatedAt,
   };
 }
 
@@ -786,6 +801,111 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_agent_plans
         WHERE deleted_at IS NULL
         ORDER BY updated_at DESC, plan_id ASC
+      `,
+  });
+
+  const listActiveAgentPlanShellMetricRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentPlanShellMetricsRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          p.plan_id AS "planId",
+          COALESCE(t.task_count, 0) AS "taskCount",
+          COALESCE(t.running_task_count, 0) AS "runningTaskCount",
+          COALESCE(t.blocked_task_count, 0) AS "blockedTaskCount",
+          COALESCE(t.done_task_count, 0) AS "doneTaskCount",
+          COALESCE(c.contract_count, 0) AS "contractCount",
+          COALESCE(u.update_count, 0) AS "updateCount",
+          MAX(
+            p.updated_at,
+            COALESCE(t.latest_updated_at, p.updated_at),
+            COALESCE(c.latest_updated_at, p.updated_at),
+            COALESCE(u.latest_updated_at, p.updated_at)
+          ) AS "latestUpdatedAt"
+        FROM projection_agent_plans p
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS task_count,
+            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_task_count,
+            SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked_task_count,
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_task_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_tasks
+          GROUP BY plan_id
+        ) t ON t.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS contract_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_contracts
+          GROUP BY plan_id
+        ) c ON c.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS update_count,
+            MAX(created_at) AS latest_updated_at
+          FROM projection_agent_shared_updates
+          GROUP BY plan_id
+        ) u ON u.plan_id = p.plan_id
+        WHERE p.deleted_at IS NULL
+        ORDER BY p.updated_at DESC, p.plan_id ASC
+      `,
+  });
+
+  const getActiveAgentPlanShellMetricRowByPlan = SqlSchema.findOneOption({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentPlanShellMetricsRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          p.plan_id AS "planId",
+          COALESCE(t.task_count, 0) AS "taskCount",
+          COALESCE(t.running_task_count, 0) AS "runningTaskCount",
+          COALESCE(t.blocked_task_count, 0) AS "blockedTaskCount",
+          COALESCE(t.done_task_count, 0) AS "doneTaskCount",
+          COALESCE(c.contract_count, 0) AS "contractCount",
+          COALESCE(u.update_count, 0) AS "updateCount",
+          MAX(
+            p.updated_at,
+            COALESCE(t.latest_updated_at, p.updated_at),
+            COALESCE(c.latest_updated_at, p.updated_at),
+            COALESCE(u.latest_updated_at, p.updated_at)
+          ) AS "latestUpdatedAt"
+        FROM projection_agent_plans p
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS task_count,
+            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_task_count,
+            SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked_task_count,
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_task_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_tasks
+          GROUP BY plan_id
+        ) t ON t.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS contract_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM projection_agent_contracts
+          GROUP BY plan_id
+        ) c ON c.plan_id = p.plan_id
+        LEFT JOIN (
+          SELECT
+            plan_id,
+            COUNT(*) AS update_count,
+            MAX(created_at) AS latest_updated_at
+          FROM projection_agent_shared_updates
+          GROUP BY plan_id
+        ) u ON u.plan_id = p.plan_id
+        WHERE p.plan_id = ${planId}
+          AND p.deleted_at IS NULL
+        LIMIT 1
       `,
   });
 
@@ -1919,27 +2039,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listAgentTaskRows(undefined).pipe(
+          listActiveAgentPlanShellMetricRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentTasks:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentTasks:decodeRows",
-              ),
-            ),
-          ),
-          listAgentSharedUpdateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentSharedUpdates:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentSharedUpdates:decodeRows",
-              ),
-            ),
-          ),
-          listAgentContractRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentContracts:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentContracts:decodeRows",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlanShellMetrics:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlanShellMetrics:decodeRows",
               ),
             ),
           ),
@@ -1961,9 +2065,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             sessionRows,
             latestTurnRows,
             agentPlanRows,
-            agentTaskRows,
-            agentSharedUpdateRows,
-            agentContractRows,
+            agentPlanShellMetricRows,
             stateRows,
           ]) =>
             Effect.gen(function* () {
@@ -1986,39 +2088,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   updatedAt = maxIso(updatedAt, row.completedAt);
                 }
               }
-              const activeAgentPlanIds = new Set(agentPlanRows.map((row) => row.planId));
-              const tasksByPlan = new Map<string, Array<AgentTask>>();
-              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
-              const contractsByPlan = new Map<string, Array<AgentContract>>();
+              const metricsByPlan = new Map(
+                agentPlanShellMetricRows.map((row) => [row.planId, row] as const),
+              );
               for (const row of agentPlanRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
               }
-              for (const row of agentTaskRows) {
-                if (!activeAgentPlanIds.has(row.planId)) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const tasks = tasksByPlan.get(row.planId) ?? [];
-                tasks.push(row);
-                tasksByPlan.set(row.planId, tasks);
-              }
-              for (const row of agentSharedUpdateRows) {
-                if (!activeAgentPlanIds.has(row.planId)) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.createdAt);
-                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
-                sharedUpdates.push(row);
-                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
-              }
-              for (const row of agentContractRows) {
-                if (!activeAgentPlanIds.has(row.planId)) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const contracts = contractsByPlan.get(row.planId) ?? [];
-                contracts.push(row);
-                contractsByPlan.set(row.planId, contracts);
+              for (const row of agentPlanShellMetricRows) {
+                updatedAt = maxIso(updatedAt, row.latestUpdatedAt);
               }
               for (const row of stateRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -2066,12 +2143,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     : Result.failVoid,
                 ),
                 agentPlans: agentPlanRows.map((row) =>
-                  mapAgentPlanShell({
-                    row,
-                    tasks: tasksByPlan.get(row.planId) ?? [],
-                    sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
-                    contracts: contractsByPlan.get(row.planId) ?? [],
-                  }),
+                  metricsByPlan.has(row.planId)
+                    ? mapAgentPlanShell({ row, metrics: metricsByPlan.get(row.planId)! })
+                    : mapAgentPlanShell({ row }),
                 ),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
@@ -2588,7 +2662,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getAgentPlanShellById: ProjectionSnapshotQueryShape["getAgentPlanShellById"] = (planId) =>
     Effect.gen(function* () {
-      const [planRow, taskRows, sharedUpdateRows, contractRows] = yield* Effect.all([
+      const [planRow, metricsRow] = yield* Effect.all([
         getActiveAgentPlanRowById({ planId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2597,27 +2671,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
-        listAgentTaskRowsByPlan({ planId }).pipe(
+        getActiveAgentPlanShellMetricRowByPlan({ planId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listTasks:query",
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listTasks:decodeRows",
-            ),
-          ),
-        ),
-        listAgentSharedUpdateRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listUpdates:query",
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listUpdates:decodeRows",
-            ),
-          ),
-        ),
-        listAgentContractRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listContracts:query",
-              "ProjectionSnapshotQuery.getAgentPlanShellById:listContracts:decodeRows",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:getMetrics:query",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:getMetrics:decodeRow",
             ),
           ),
         ),
@@ -2628,12 +2686,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       }
 
       return Option.some(
-        mapAgentPlanShell({
-          row: planRow.value,
-          tasks: taskRows,
-          sharedUpdates: sharedUpdateRows,
-          contracts: contractRows,
-        }),
+        Option.isSome(metricsRow)
+          ? mapAgentPlanShell({ row: planRow.value, metrics: metricsRow.value })
+          : mapAgentPlanShell({ row: planRow.value }),
       );
     });
 

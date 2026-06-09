@@ -183,6 +183,10 @@ function createClient() {
       dispatchCommand: vi.fn(async () => undefined),
       getTurnDiff: vi.fn(async () => undefined),
       getFullThreadDiff: vi.fn(async () => undefined),
+      getArchivedShellSnapshot: vi.fn(async () => undefined),
+      getAgentPlan: vi.fn(async () => undefined),
+      startAgentPlanOwnerPlanning: vi.fn(async () => undefined),
+      subscribeAgentPlan: vi.fn(() => () => undefined),
     },
     terminal: {
       open: vi.fn(async () => undefined),

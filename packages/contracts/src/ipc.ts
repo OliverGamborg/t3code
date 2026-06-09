@@ -60,6 +60,8 @@ import type {
   OrchestrationGetAgentPlanResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationStartAgentPlanOwnerPlanningInput,
+  OrchestrationStartAgentPlanOwnerPlanningResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
@@ -612,6 +614,9 @@ export interface EnvironmentApi {
     getAgentPlan: (
       input: OrchestrationGetAgentPlanInput,
     ) => Promise<OrchestrationGetAgentPlanResult>;
+    startAgentPlanOwnerPlanning: (
+      input: OrchestrationStartAgentPlanOwnerPlanningInput,
+    ) => Promise<OrchestrationStartAgentPlanOwnerPlanningResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {

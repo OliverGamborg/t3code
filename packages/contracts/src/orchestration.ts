@@ -41,6 +41,7 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
   getAgentPlan: "orchestration.getAgentPlan",
+  startAgentPlanOwnerPlanning: "orchestration.startAgentPlanOwnerPlanning",
   subscribeAgentPlan: "orchestration.subscribeAgentPlan",
 } as const;
 
@@ -1395,6 +1396,23 @@ export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsRe
 export const OrchestrationGetAgentPlanResult = AgentPlanDetailSnapshot;
 export type OrchestrationGetAgentPlanResult = typeof OrchestrationGetAgentPlanResult.Type;
 
+export const OrchestrationStartAgentPlanOwnerPlanningInput = Schema.Struct({
+  planId: AgentPlanId,
+  modelSelection: Schema.optional(ModelSelection),
+  runtimeMode: Schema.optional(RuntimeMode),
+  interactionMode: Schema.optional(ProviderInteractionMode),
+});
+export type OrchestrationStartAgentPlanOwnerPlanningInput =
+  typeof OrchestrationStartAgentPlanOwnerPlanningInput.Type;
+
+export const OrchestrationStartAgentPlanOwnerPlanningResult = Schema.Struct({
+  planId: AgentPlanId,
+  ownerThreadId: ThreadId,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationStartAgentPlanOwnerPlanningResult =
+  typeof OrchestrationStartAgentPlanOwnerPlanningResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1419,6 +1437,10 @@ export const OrchestrationRpcSchemas = {
   getAgentPlan: {
     input: OrchestrationGetAgentPlanInput,
     output: OrchestrationGetAgentPlanResult,
+  },
+  startAgentPlanOwnerPlanning: {
+    input: OrchestrationStartAgentPlanOwnerPlanningInput,
+    output: OrchestrationStartAgentPlanOwnerPlanningResult,
   },
   subscribeAgentPlan: {
     input: OrchestrationSubscribeAgentPlanInput,

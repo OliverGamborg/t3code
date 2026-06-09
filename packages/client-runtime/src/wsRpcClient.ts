@@ -166,6 +166,9 @@ export interface WsRpcClient {
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
     readonly getAgentPlan: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getAgentPlan>;
+    readonly startAgentPlanOwnerPlanning: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning
+    >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
     readonly subscribeAgentPlan: RpcInputStreamMethod<
@@ -365,6 +368,10 @@ export function createWsRpcClient(
         ),
       getAgentPlan: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getAgentPlan](input)),
+      startAgentPlanOwnerPlanning: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning](input),
+        ),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),

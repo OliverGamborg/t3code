@@ -3,7 +3,7 @@ import type {
   VcsStatusRemoteResult,
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
-import { ORCHESTRATION_WS_METHODS, ThreadId, WS_METHODS } from "@t3tools/contracts";
+import { AgentPlanId, ORCHESTRATION_WS_METHODS, ThreadId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("./wsTransport.ts", () => ({
@@ -182,5 +182,42 @@ describe("createWsRpcClient", () => {
       WS_METHODS.subscribeServerConfig,
       ORCHESTRATION_WS_METHODS.subscribeThread,
     ]);
+  });
+
+  it("delegates owner planning start requests to the orchestration RPC", async () => {
+    const planId = AgentPlanId.make("plan-owner-start");
+    const ownerThreadId = ThreadId.make("thread-owner-start");
+    const rpcMethods = {
+      [ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning]: vi.fn(async () => ({
+        planId,
+        ownerThreadId,
+        sequence: 7,
+      })),
+    };
+    const request = vi.fn((connect: (client: typeof rpcMethods) => Promise<unknown>) =>
+      connect(rpcMethods),
+    );
+    const transport = {
+      dispose: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      isHeartbeatFresh: vi.fn(() => true),
+      request: request as unknown as WsTransport["request"],
+      requestStream: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+    } satisfies Pick<
+      WsTransport,
+      "dispose" | "isHeartbeatFresh" | "reconnect" | "request" | "requestStream" | "subscribe"
+    >;
+
+    const client = createWsRpcClient(transport as unknown as WsTransport);
+
+    await expect(client.orchestration.startAgentPlanOwnerPlanning({ planId })).resolves.toEqual({
+      planId,
+      ownerThreadId,
+      sequence: 7,
+    });
+    expect(rpcMethods[ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning]).toHaveBeenCalledWith({
+      planId,
+    });
   });
 });

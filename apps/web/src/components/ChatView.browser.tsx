@@ -267,6 +267,9 @@ function createMockEnvironmentApi(input: {
       getAgentPlan: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getAgentPlan"],
+      startAgentPlanOwnerPlanning: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["startAgentPlanOwnerPlanning"],
       subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],

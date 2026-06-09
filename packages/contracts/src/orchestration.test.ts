@@ -15,6 +15,7 @@ import {
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
+  OrchestrationStartAgentPlanOwnerPlanningInput,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
@@ -53,6 +54,9 @@ const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpda
 const decodeAgentPlan = Schema.decodeUnknownEffect(AgentPlan);
 const decodeAgentPlanShell = Schema.decodeUnknownEffect(AgentPlanShell);
 const decodeAgentTask = Schema.decodeUnknownEffect(AgentTask);
+const decodeStartAgentPlanOwnerPlanningInput = Schema.decodeUnknownEffect(
+  OrchestrationStartAgentPlanOwnerPlanningInput,
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -132,6 +136,25 @@ it.effect("rejects empty agent plan shell titles", () =>
     );
 
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("decodes owner planning start input with provider overrides", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeStartAgentPlanOwnerPlanningInput({
+      planId: "plan-1",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+    });
+
+    assert.strictEqual(parsed.planId, "plan-1");
+    assert.strictEqual(parsed.modelSelection?.instanceId, ProviderInstanceId.make("codex"));
+    assert.strictEqual(parsed.runtimeMode, "approval-required");
+    assert.strictEqual(parsed.interactionMode, "plan");
   }),
 );
 

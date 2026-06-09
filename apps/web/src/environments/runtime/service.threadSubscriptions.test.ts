@@ -88,6 +88,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     orchestration: {
       dispatchCommand: vi.fn(),
       getAgentPlan: vi.fn(),
+      startAgentPlanOwnerPlanning: vi.fn(),
       getTurnDiff: vi.fn(),
       getFullThreadDiff: vi.fn(),
       getArchivedShellSnapshot: vi.fn(),
@@ -272,6 +273,7 @@ describe("retainThreadDetailSubscription", () => {
       isHeartbeatFresh: vi.fn(() => true),
       orchestration: {
         getAgentPlan: vi.fn(),
+        startAgentPlanOwnerPlanning: vi.fn(),
         subscribeAgentPlan: vi.fn(() => () => undefined),
         subscribeThread: mockSubscribeThread,
       },
@@ -586,6 +588,7 @@ describe("retainThreadDetailSubscription", () => {
       isHeartbeatFresh: vi.fn(() => false),
       orchestration: {
         getAgentPlan: vi.fn(),
+        startAgentPlanOwnerPlanning: vi.fn(),
         subscribeAgentPlan: vi.fn(() => () => undefined),
         subscribeThread: mockSubscribeThread,
       },

@@ -10,10 +10,12 @@ import {
 import { Link } from "@tanstack/react-router";
 import {
   ClipboardListIcon,
+  ExternalLinkIcon,
   FileTextIcon,
   GitBranchIcon,
   Loader2Icon,
   NetworkIcon,
+  PlayIcon,
   PlusIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -89,6 +91,7 @@ export function AgentPlansPage({ planId }: AgentPlansPageProps) {
 
     setCreating(true);
     setCreateError(null);
+    let createdPlanId: AgentPlanId | null = null;
     try {
       const now = new Date().toISOString();
       const planId = AgentPlanId.make(randomUUID());
@@ -106,6 +109,7 @@ export function AgentPlansPage({ planId }: AgentPlansPageProps) {
         primaryProjectId: selectedProject.id,
         createdAt: now,
       });
+      createdPlanId = planId;
 
       await api.orchestration.dispatchCommand({
         type: "agent-task.upsert",
@@ -208,6 +212,18 @@ export function AgentPlansPage({ planId }: AgentPlansPageProps) {
 
       setPrompt("");
     } catch (error) {
+      if (createdPlanId !== null) {
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "agent-plan.status.set",
+            commandId: newCommandId(),
+            planId: createdPlanId,
+            status: "failed",
+          });
+        } catch {
+          // Best-effort recovery: keep the original creation failure visible to the user.
+        }
+      }
       setCreateError(error instanceof Error ? error.message : "Failed to create agent plan.");
     } finally {
       setCreating(false);
@@ -315,6 +331,8 @@ export function AgentPlansPage({ planId }: AgentPlansPageProps) {
             <PlanDetail
               detail={detail.snapshot}
               loading={detail.loading}
+              error={detail.error}
+              environmentId={environmentId}
               planTitle={selectedPlanSummary?.title ?? "Agent plan"}
             />
           )}
@@ -330,31 +348,41 @@ function useAgentPlanDetail(
 ): {
   readonly snapshot: AgentPlanDetailSnapshot | null;
   readonly loading: boolean;
+  readonly error: string | null;
 } {
   const [snapshot, setSnapshot] = useState<AgentPlanDetailSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!environmentId || !planId) {
       setSnapshot(null);
       setLoading(false);
+      setError(null);
       return;
     }
     const api = readEnvironmentApi(environmentId);
     if (!api) {
       setSnapshot(null);
       setLoading(false);
+      setError("Environment connection is not ready.");
       return;
     }
 
     let disposed = false;
     const refresh = () => {
       setLoading(true);
+      setError(null);
       void api.orchestration
         .getAgentPlan({ planId })
         .then((nextSnapshot) => {
           if (!disposed) {
             setSnapshot(nextSnapshot);
+          }
+        })
+        .catch((nextError: unknown) => {
+          if (!disposed) {
+            setError(nextError instanceof Error ? nextError.message : "Failed to load agent plan.");
           }
         })
         .finally(() => {
@@ -369,6 +397,7 @@ function useAgentPlanDetail(
       if (item.kind === "snapshot") {
         setSnapshot(item.snapshot);
         setLoading(false);
+        setError(null);
         return;
       }
       refresh();
@@ -380,7 +409,7 @@ function useAgentPlanDetail(
     };
   }, [environmentId, planId]);
 
-  return { snapshot, loading };
+  return { snapshot, loading, error };
 }
 
 function EmptyPlanState() {
@@ -400,12 +429,19 @@ function EmptyPlanState() {
 function PlanDetail({
   detail,
   loading,
+  error,
+  environmentId,
   planTitle,
 }: {
   readonly detail: AgentPlanDetailSnapshot | null;
   readonly loading: boolean;
+  readonly error: string | null;
+  readonly environmentId: EnvironmentId | null | undefined;
   readonly planTitle: string;
 }) {
+  const [startingOwnerPlanning, setStartingOwnerPlanning] = useState(false);
+  const [ownerPlanningError, setOwnerPlanningError] = useState<string | null>(null);
+
   if (loading && detail === null) {
     return (
       <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
@@ -418,12 +454,40 @@ function PlanDetail({
   if (detail === null) {
     return (
       <div className="rounded-md border border-border px-4 py-5 text-sm text-muted-foreground">
-        {planTitle} is not available.
+        {error ?? `${planTitle} is not available.`}
       </div>
     );
   }
 
   const plan = detail.plan;
+  const ownerThreadActive =
+    plan.ownerThreadId !== null && (plan.status === "planning" || plan.status === "running");
+  const canStartOwnerPlanning =
+    environmentId !== null && environmentId !== undefined && !ownerThreadActive;
+
+  const startOwnerPlanning = async () => {
+    if (!environmentId) {
+      setOwnerPlanningError("Environment connection is not ready.");
+      return;
+    }
+    const api = readEnvironmentApi(environmentId);
+    if (!api) {
+      setOwnerPlanningError("Environment connection is not ready.");
+      return;
+    }
+
+    setStartingOwnerPlanning(true);
+    setOwnerPlanningError(null);
+    try {
+      await api.orchestration.startAgentPlanOwnerPlanning({ planId: plan.id });
+    } catch (startError) {
+      setOwnerPlanningError(
+        startError instanceof Error ? startError.message : "Failed to start owner planning.",
+      );
+    } finally {
+      setStartingOwnerPlanning(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -437,8 +501,36 @@ function PlanDetail({
             {plan.userPrompt}
           </p>
         </div>
-        <Badge variant={statusVariant[plan.status]}>{plan.status}</Badge>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Badge variant={statusVariant[plan.status]}>{plan.status}</Badge>
+          {plan.ownerThreadId !== null && environmentId ? (
+            <Button
+              render={
+                <Link
+                  to="/$environmentId/$threadId"
+                  params={{ environmentId, threadId: plan.ownerThreadId }}
+                />
+              }
+              size="sm"
+              variant="outline"
+            >
+              <ExternalLinkIcon />
+              Owner Thread
+            </Button>
+          ) : null}
+          <Button
+            disabled={!canStartOwnerPlanning || startingOwnerPlanning}
+            onClick={startOwnerPlanning}
+            size="sm"
+          >
+            {startingOwnerPlanning ? <Loader2Icon className="animate-spin" /> : <PlayIcon />}
+            Start Owner Planning
+          </Button>
+        </div>
       </div>
+
+      {ownerPlanningError ? <p className="text-sm text-destructive">{ownerPlanningError}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <div className="grid gap-3 md:grid-cols-3">
         <Metric label="Tasks" value={plan.tasks.length} icon={<ClipboardListIcon />} />
