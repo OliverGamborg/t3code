@@ -1,5 +1,9 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import {
+  AgentContract,
+  AgentPlan,
+  AgentSharedUpdate,
+  AgentTask,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
@@ -15,6 +19,12 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  AgentContractUpsertedPayload,
+  AgentPlanCreatedPayload,
+  AgentPlanStatusChangedPayload,
+  AgentPlanUpdatedPayload,
+  AgentSharedUpdateAppendedPayload,
+  AgentTaskUpsertedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -29,8 +39,12 @@ import {
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
+type AgentPlanPatch = Partial<Omit<AgentPlan, "id">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_AGENT_PLAN_TASKS = 500;
+const MAX_AGENT_PLAN_UPDATES = 1_000;
+const MAX_AGENT_PLAN_CONTRACTS = 500;
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -67,6 +81,14 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+}
+
+function updateAgentPlan(
+  agentPlans: ReadonlyArray<AgentPlan>,
+  planId: AgentPlan["id"],
+  patch: AgentPlanPatch,
+): AgentPlan[] {
+  return agentPlans.map((plan) => (plan.id === planId ? { ...plan, ...patch } : plan));
 }
 
 function decodeForEvent<A>(
@@ -183,6 +205,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    agentPlans: [],
     updatedAt: nowIso,
   };
 }
@@ -687,6 +710,166 @@ export function projectEvent(
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
               updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "agent-plan.created":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          AgentPlanCreatedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const plan: AgentPlan = yield* decodeForEvent(
+          AgentPlan,
+          {
+            id: payload.planId,
+            title: payload.title,
+            userPrompt: payload.userPrompt,
+            status: payload.status,
+            projectIds: payload.projectIds,
+            primaryProjectId: payload.primaryProjectId,
+            ownerThreadId: payload.ownerThreadId,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            deletedAt: null,
+            tasks: [],
+            sharedUpdates: [],
+            contracts: [],
+          },
+          event.type,
+          "plan",
+        );
+        const existing = nextBase.agentPlans.find((entry) => entry.id === plan.id);
+        return {
+          ...nextBase,
+          agentPlans: existing
+            ? nextBase.agentPlans.map((entry) => (entry.id === plan.id ? plan : entry))
+            : [...nextBase.agentPlans, plan],
+        };
+      });
+
+    case "agent-plan.updated":
+      return decodeForEvent(AgentPlanUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.userPrompt !== undefined ? { userPrompt: payload.userPrompt } : {}),
+            ...(payload.projectIds !== undefined ? { projectIds: payload.projectIds } : {}),
+            ...(payload.primaryProjectId !== undefined
+              ? { primaryProjectId: payload.primaryProjectId }
+              : {}),
+            ...(payload.ownerThreadId !== undefined
+              ? { ownerThreadId: payload.ownerThreadId }
+              : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "agent-plan.status-changed":
+      return decodeForEvent(
+        AgentPlanStatusChangedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+            status: payload.status,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "agent-task.upserted":
+      return decodeForEvent(AgentTaskUpsertedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const plan = nextBase.agentPlans.find((entry) => entry.id === payload.planId);
+          if (!plan) {
+            return nextBase;
+          }
+          const tasks = [
+            ...plan.tasks.filter((entry) => entry.id !== payload.task.id),
+            payload.task,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(-MAX_AGENT_PLAN_TASKS) as ReadonlyArray<AgentTask>;
+          return {
+            ...nextBase,
+            agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+              tasks,
+              updatedAt: payload.task.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "agent-shared-update.appended":
+      return decodeForEvent(
+        AgentSharedUpdateAppendedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const plan = nextBase.agentPlans.find((entry) => entry.id === payload.planId);
+          if (!plan) {
+            return nextBase;
+          }
+          const sharedUpdates = [
+            ...plan.sharedUpdates.filter((entry) => entry.id !== payload.update.id),
+            payload.update,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(-MAX_AGENT_PLAN_UPDATES) as ReadonlyArray<AgentSharedUpdate>;
+          return {
+            ...nextBase,
+            agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+              sharedUpdates,
+              updatedAt: payload.update.createdAt,
+            }),
+          };
+        }),
+      );
+
+    case "agent-contract.upserted":
+      return decodeForEvent(
+        AgentContractUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const plan = nextBase.agentPlans.find((entry) => entry.id === payload.planId);
+          if (!plan) {
+            return nextBase;
+          }
+          const contracts = [
+            ...plan.contracts.filter((entry) => entry.id !== payload.contract.id),
+            payload.contract,
+          ]
+            .toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            )
+            .slice(-MAX_AGENT_PLAN_CONTRACTS) as ReadonlyArray<AgentContract>;
+          return {
+            ...nextBase,
+            agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+              contracts,
+              updatedAt: payload.contract.updatedAt,
             }),
           };
         }),

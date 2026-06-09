@@ -1,4 +1,6 @@
 import type {
+  AgentPlan,
+  AgentPlanId,
   OrchestrationCommand,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -29,6 +31,13 @@ export function findProjectById(
   projectId: ProjectId,
 ): OrchestrationProject | undefined {
   return readModel.projects.find((project) => project.id === projectId);
+}
+
+export function findAgentPlanById(
+  readModel: OrchestrationReadModel,
+  planId: AgentPlanId,
+): AgentPlan | undefined {
+  return readModel.agentPlans.find((plan) => plan.id === planId);
 }
 
 export function listThreadsByProjectId(
@@ -67,6 +76,40 @@ export function requireProjectAbsent(input: {
     invariantError(
       input.command.type,
       `Project '${input.projectId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
+export function requireAgentPlan(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly planId: AgentPlanId;
+}): Effect.Effect<AgentPlan, OrchestrationCommandInvariantError> {
+  const plan = findAgentPlanById(input.readModel, input.planId);
+  if (plan && plan.deletedAt === null) {
+    return Effect.succeed(plan);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent plan '${input.planId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireAgentPlanAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly planId: AgentPlanId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const plan = findAgentPlanById(input.readModel, input.planId);
+  if (!plan || plan.deletedAt !== null) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent plan '${input.planId}' already exists and cannot be created twice.`,
     ),
   );
 }

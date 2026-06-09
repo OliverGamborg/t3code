@@ -53,6 +53,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
+  OrchestrationGetAgentPlanInput,
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
@@ -493,6 +494,22 @@ export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetAgentPlanRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getAgentPlan, {
+  payload: OrchestrationGetAgentPlanInput,
+  success: OrchestrationRpcSchemas.getAgentPlan.output,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+});
+
+export const WsOrchestrationSubscribeAgentPlanRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeAgentPlan,
+  {
+    payload: OrchestrationRpcSchemas.subscribeAgentPlan.input,
+    success: OrchestrationRpcSchemas.subscribeAgentPlan.output,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+
 export const WsOrchestrationSubscribeShellRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeShell, {
   payload: OrchestrationRpcSchemas.subscribeShell.input,
   success: OrchestrationRpcSchemas.subscribeShell.output,
@@ -597,6 +614,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationGetAgentPlanRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsOrchestrationSubscribeAgentPlanRpc,
 );

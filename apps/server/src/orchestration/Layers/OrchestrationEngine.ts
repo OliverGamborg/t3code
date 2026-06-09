@@ -1,6 +1,7 @@
 import type {
   OrchestrationEvent,
   OrchestrationReadModel,
+  AgentPlanId,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -57,8 +58,8 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
+  readonly aggregateKind: "project" | "thread" | "agent-plan";
+  readonly aggregateId: ProjectId | ThreadId | AgentPlanId;
 } {
   switch (command.type) {
     case "project.create":
@@ -67,6 +68,16 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
+      };
+    case "agent-plan.create":
+    case "agent-plan.update":
+    case "agent-plan.status.set":
+    case "agent-task.upsert":
+    case "agent-shared-update.append":
+    case "agent-contract.upsert":
+      return {
+        aggregateKind: "agent-plan",
+        aggregateId: command.planId,
       };
     default:
       return {

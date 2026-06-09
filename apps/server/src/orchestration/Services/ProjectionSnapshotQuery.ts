@@ -15,6 +15,9 @@ import type {
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadShell,
+  AgentPlanDetailSnapshot,
+  AgentPlanId,
+  AgentPlanShell,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -157,6 +160,20 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Read a single active agent plan shell row by id.
+   */
+  readonly getAgentPlanShellById: (
+    planId: AgentPlanId,
+  ) => Effect.Effect<Option.Option<AgentPlanShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read a single active agent plan detail snapshot by id.
+   */
+  readonly getAgentPlanDetailById: (
+    planId: AgentPlanId,
+  ) => Effect.Effect<Option.Option<AgentPlanDetailSnapshot>, ProjectionRepositoryError>;
 }
 
 /**

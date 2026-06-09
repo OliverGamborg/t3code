@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
+import { Route as AgentPlansRouteImport } from './routes/agent-plans'
 import { Route as ChatRouteImport } from './routes/_chat'
+import { Route as AgentPlansIndexRouteImport } from './routes/agent-plans.index'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
@@ -20,6 +22,7 @@ import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as AgentPlansPlanIdRouteImport } from './routes/agent-plans.$planId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -33,9 +36,19 @@ const PairRoute = PairRouteImport.update({
   path: '/pair',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentPlansRoute = AgentPlansRouteImport.update({
+  id: '/agent-plans',
+  path: '/agent-plans',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChatRoute = ChatRouteImport.update({
   id: '/_chat',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AgentPlansIndexRoute = AgentPlansIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AgentPlansRoute,
 } as any)
 const ChatIndexRoute = ChatIndexRouteImport.update({
   id: '/',
@@ -77,6 +90,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const AgentPlansPlanIdRoute = AgentPlansPlanIdRouteImport.update({
+  id: '/$planId',
+  path: '/$planId',
+  getParentRoute: () => AgentPlansRoute,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -91,8 +109,10 @@ const ChatEnvironmentIdThreadIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
+  '/agent-plans': typeof AgentPlansRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/agent-plans/$planId': typeof AgentPlansPlanIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -100,12 +120,14 @@ export interface FileRoutesByFullPath {
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
+  '/agent-plans/': typeof AgentPlansIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
 }
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/agent-plans/$planId': typeof AgentPlansPlanIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -114,14 +136,17 @@ export interface FileRoutesByTo {
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
+  '/agent-plans': typeof AgentPlansIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
+  '/agent-plans': typeof AgentPlansRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/agent-plans/$planId': typeof AgentPlansPlanIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
@@ -130,6 +155,7 @@ export interface FileRoutesById {
   '/settings/providers': typeof SettingsProvidersRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
+  '/agent-plans/': typeof AgentPlansIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
 }
@@ -137,8 +163,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent-plans'
     | '/pair'
     | '/settings'
+    | '/agent-plans/$planId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -146,12 +174,14 @@ export interface FileRouteTypes {
     | '/settings/keybindings'
     | '/settings/providers'
     | '/settings/source-control'
+    | '/agent-plans/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pair'
     | '/settings'
+    | '/agent-plans/$planId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -160,13 +190,16 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/source-control'
     | '/'
+    | '/agent-plans'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
   id:
     | '__root__'
     | '/_chat'
+    | '/agent-plans'
     | '/pair'
     | '/settings'
+    | '/agent-plans/$planId'
     | '/settings/archived'
     | '/settings/connections'
     | '/settings/diagnostics'
@@ -175,12 +208,14 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/source-control'
     | '/_chat/'
+    | '/agent-plans/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
+  AgentPlansRoute: typeof AgentPlansRouteWithChildren
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
 }
@@ -201,12 +236,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PairRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent-plans': {
+      id: '/agent-plans'
+      path: '/agent-plans'
+      fullPath: '/agent-plans'
+      preLoaderRoute: typeof AgentPlansRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat': {
       id: '/_chat'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/agent-plans/': {
+      id: '/agent-plans/'
+      path: '/'
+      fullPath: '/agent-plans/'
+      preLoaderRoute: typeof AgentPlansIndexRouteImport
+      parentRoute: typeof AgentPlansRoute
     }
     '/_chat/': {
       id: '/_chat/'
@@ -264,6 +313,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/agent-plans/$planId': {
+      id: '/agent-plans/$planId'
+      path: '/$planId'
+      fullPath: '/agent-plans/$planId'
+      preLoaderRoute: typeof AgentPlansPlanIdRouteImport
+      parentRoute: typeof AgentPlansRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -295,6 +351,20 @@ const ChatRouteChildren: ChatRouteChildren = {
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
+interface AgentPlansRouteChildren {
+  AgentPlansPlanIdRoute: typeof AgentPlansPlanIdRoute
+  AgentPlansIndexRoute: typeof AgentPlansIndexRoute
+}
+
+const AgentPlansRouteChildren: AgentPlansRouteChildren = {
+  AgentPlansPlanIdRoute: AgentPlansPlanIdRoute,
+  AgentPlansIndexRoute: AgentPlansIndexRoute,
+}
+
+const AgentPlansRouteWithChildren = AgentPlansRoute._addFileChildren(
+  AgentPlansRouteChildren,
+)
+
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
@@ -321,6 +391,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
+  AgentPlansRoute: AgentPlansRouteWithChildren,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
 }

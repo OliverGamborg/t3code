@@ -444,6 +444,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
             Effect.succeed({
               snapshotSequence: 1,
               projects: [project],
+              agentPlans: [],
               threads: [thread],
               updatedAt: now,
             } satisfies OrchestrationShellSnapshot),
@@ -614,6 +615,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
               Effect.succeed({
                 snapshotSequence: 1,
                 projects: [project],
+                agentPlans: [],
                 threads: [thread],
                 updatedAt: now,
               } satisfies OrchestrationShellSnapshot),

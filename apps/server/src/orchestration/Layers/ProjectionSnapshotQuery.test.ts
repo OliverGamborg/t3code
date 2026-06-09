@@ -1,4 +1,8 @@
 import {
+  AgentContractId,
+  AgentPlanId,
+  AgentSharedUpdateId,
+  AgentTaskId,
   CheckpointRef,
   EventId,
   MessageId,
@@ -11,6 +15,7 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -25,6 +30,11 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+const asAgentPlanId = (value: string): AgentPlanId => AgentPlanId.make(value);
+const asAgentTaskId = (value: string): AgentTaskId => AgentTaskId.make(value);
+const asAgentSharedUpdateId = (value: string): AgentSharedUpdateId =>
+  AgentSharedUpdateId.make(value);
+const asAgentContractId = (value: string): AgentContractId => AgentContractId.make(value);
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -1431,6 +1441,186 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.projects.length, 0);
       assert.equal(shellSnapshot.threads.length, 0);
+    }),
+  );
+
+  it.effect("hydrates agent plan shell and detail snapshots", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const planId = asAgentPlanId("agent-plan-snapshot");
+      const taskId = asAgentTaskId("agent-task-snapshot");
+      const updateId = asAgentSharedUpdateId("agent-update-snapshot");
+      const contractId = asAgentContractId("agent-contract-snapshot");
+
+      yield* sql`DELETE FROM projection_agent_contracts`;
+      yield* sql`DELETE FROM projection_agent_shared_updates`;
+      yield* sql`DELETE FROM projection_agent_tasks`;
+      yield* sql`DELETE FROM projection_agent_plans`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_agent_plans (
+          plan_id,
+          title,
+          user_prompt,
+          status,
+          owner_thread_id,
+          primary_project_id,
+          project_ids_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          ${planId},
+          'Owner plan',
+          'Coordinate archive work',
+          'running',
+          NULL,
+          'project-1',
+          '["project-1"]',
+          '2026-04-06T00:00:00.000Z',
+          '2026-04-06T00:00:04.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_agent_tasks (
+          task_id,
+          plan_id,
+          title,
+          description,
+          status,
+          project_id,
+          worker_thread_id,
+          worktree_path,
+          branch_name,
+          allowed_paths_json,
+          blocked_paths_json,
+          depends_on_json,
+          related_task_ids_json,
+          required_contract_ids_json,
+          produced_contract_ids_json,
+          assigned_provider,
+          summary,
+          risk_notes,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${taskId},
+          ${planId},
+          'Backend task',
+          'Add archive API',
+          'done',
+          'project-1',
+          NULL,
+          NULL,
+          NULL,
+          '["apps/server/src"]',
+          '[".repos"]',
+          '[]',
+          '[]',
+          '[]',
+          ${`["${contractId}"]`},
+          'codex',
+          'Implemented API',
+          NULL,
+          '2026-04-06T00:00:01.000Z',
+          '2026-04-06T00:00:02.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_agent_shared_updates (
+          update_id,
+          plan_id,
+          task_id,
+          type,
+          title,
+          body,
+          visibility,
+          related_task_ids_json,
+          created_at
+        )
+        VALUES (
+          ${updateId},
+          ${planId},
+          ${taskId},
+          'progress',
+          'API complete',
+          'Archive endpoint is implemented.',
+          'all_workers',
+          '[]',
+          '2026-04-06T00:00:03.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_agent_contracts (
+          contract_id,
+          plan_id,
+          producer_task_id,
+          consumer_task_ids_json,
+          type,
+          title,
+          description,
+          status,
+          version,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${contractId},
+          ${planId},
+          ${taskId},
+          '[]',
+          'api',
+          'Archive response shape',
+          'The endpoint returns archivedAt.',
+          'accepted',
+          1,
+          '2026-04-06T00:00:04.000Z',
+          '2026-04-06T00:00:04.000Z'
+        )
+      `;
+
+      let sequence = 10;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-04-06T00:00:05.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      const planShell = shellSnapshot.agentPlans[0];
+      assert.equal(planShell?.id, planId);
+      assert.equal(planShell?.taskCount, 1);
+      assert.equal(planShell?.doneTaskCount, 1);
+      assert.equal(planShell?.contractCount, 1);
+      assert.equal(planShell?.updateCount, 1);
+
+      const detail = yield* snapshotQuery.getAgentPlanDetailById(planId);
+      if (Option.isNone(detail)) {
+        throw new Error("Expected agent plan detail snapshot.");
+      }
+      assert.equal(detail.value.plan.id, planId);
+      assert.equal(detail.value.plan.tasks[0]?.id, taskId);
+      assert.equal(detail.value.plan.tasks[0]?.allowedPaths[0], "apps/server/src");
+      assert.equal(detail.value.plan.sharedUpdates[0]?.id, updateId);
+      assert.equal(detail.value.plan.contracts[0]?.id, contractId);
     }),
   );
 });

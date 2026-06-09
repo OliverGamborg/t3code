@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import {
+  AgentPlanId,
   CheckpointRef,
   DEFAULT_MODEL,
   EnvironmentId,
@@ -14,9 +15,11 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  applyShellEvent,
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   removeEnvironmentState,
+  selectAgentPlansAcrossEnvironments,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
   selectThreadByRef,
@@ -174,6 +177,8 @@ function makeState(thread: Thread): AppState {
       ) as EnvironmentState["turnDiffSummaryByThreadId"][ThreadId],
     },
     sidebarThreadSummaryById: {},
+    agentPlanIds: [],
+    agentPlanShellById: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, {
@@ -199,6 +204,8 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
     sidebarThreadSummaryById: {},
+    agentPlanIds: [],
+    agentPlanShellById: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, overrides);
@@ -484,6 +491,59 @@ describe("incremental orchestration updates", () => {
 
     expect(nextAfterProjectDelete).toBe(state);
     expect(nextAfterThreadDelete).toBe(state);
+  });
+
+  it("applies agent plan shell upsert and remove events", () => {
+    const state = makeEmptyState();
+    const planId = AgentPlanId.make("agent-plan-store");
+    const projectId = ProjectId.make("project-1");
+
+    const withPlan = applyShellEvent(
+      state,
+      {
+        kind: "agent-plan-upserted",
+        sequence: 1,
+        plan: {
+          id: planId,
+          title: "Owner plan",
+          status: "running",
+          projectIds: [projectId],
+          primaryProjectId: projectId,
+          ownerThreadId: null,
+          taskCount: 2,
+          runningTaskCount: 1,
+          blockedTaskCount: 0,
+          doneTaskCount: 1,
+          contractCount: 1,
+          updateCount: 3,
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:00:01.000Z",
+        },
+      },
+      localEnvironmentId,
+    );
+
+    expect(selectAgentPlansAcrossEnvironments(withPlan)).toEqual([
+      expect.objectContaining({
+        id: planId,
+        environmentId: localEnvironmentId,
+        title: "Owner plan",
+        taskCount: 2,
+        updateCount: 3,
+      }),
+    ]);
+
+    const withoutPlan = applyShellEvent(
+      withPlan,
+      {
+        kind: "agent-plan-removed",
+        sequence: 2,
+        planId,
+      },
+      localEnvironmentId,
+    );
+
+    expect(selectAgentPlansAcrossEnvironments(withoutPlan)).toEqual([]);
   });
 
   it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {

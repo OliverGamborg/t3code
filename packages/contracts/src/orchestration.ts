@@ -7,6 +7,7 @@ import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import {
+  AgentPlanId,
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
@@ -21,6 +22,15 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  AgentContract,
+  AgentPlan,
+  AgentPlanDetailSnapshot,
+  AgentPlanShell,
+  AgentPlanStatus,
+  AgentSharedUpdate,
+  AgentTask,
+} from "./agentPlan.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -30,6 +40,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  getAgentPlan: "orchestration.getAgentPlan",
+  subscribeAgentPlan: "orchestration.subscribeAgentPlan",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -360,6 +372,7 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  agentPlans: Schema.Array(AgentPlan).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -403,6 +416,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  agentPlans: Schema.Array(AgentPlanShell).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -428,6 +442,16 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     sequence: NonNegativeInt,
     threadId: ThreadId,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("agent-plan-upserted"),
+    sequence: NonNegativeInt,
+    plan: AgentPlanShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("agent-plan-removed"),
+    sequence: NonNegativeInt,
+    planId: AgentPlanId,
+  }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
 
@@ -444,6 +468,14 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
+
+export const OrchestrationGetAgentPlanInput = Schema.Struct({
+  planId: AgentPlanId,
+});
+export type OrchestrationGetAgentPlanInput = typeof OrchestrationGetAgentPlanInput.Type;
+
+export const OrchestrationSubscribeAgentPlanInput = OrchestrationGetAgentPlanInput;
+export type OrchestrationSubscribeAgentPlanInput = typeof OrchestrationSubscribeAgentPlanInput.Type;
 
 export const OrchestrationThreadDetailSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
@@ -645,6 +677,57 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const AgentPlanCreateCommand = Schema.Struct({
+  type: Schema.Literal("agent-plan.create"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  title: TrimmedNonEmptyString,
+  userPrompt: TrimmedNonEmptyString,
+  projectIds: Schema.Array(ProjectId),
+  primaryProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  ownerThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  createdAt: IsoDateTime,
+});
+
+const AgentPlanUpdateCommand = Schema.Struct({
+  type: Schema.Literal("agent-plan.update"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  userPrompt: Schema.optional(TrimmedNonEmptyString),
+  projectIds: Schema.optional(Schema.Array(ProjectId)),
+  primaryProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  ownerThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+});
+
+const AgentPlanStatusSetCommand = Schema.Struct({
+  type: Schema.Literal("agent-plan.status.set"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  status: AgentPlanStatus,
+});
+
+const AgentTaskUpsertCommand = Schema.Struct({
+  type: Schema.Literal("agent-task.upsert"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  task: AgentTask,
+});
+
+const AgentSharedUpdateAppendCommand = Schema.Struct({
+  type: Schema.Literal("agent-shared-update.append"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  update: AgentSharedUpdate,
+});
+
+const AgentContractUpsertCommand = Schema.Struct({
+  type: Schema.Literal("agent-contract.upsert"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+  contract: AgentContract,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -662,6 +745,12 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  AgentPlanCreateCommand,
+  AgentPlanUpdateCommand,
+  AgentPlanStatusSetCommand,
+  AgentTaskUpsertCommand,
+  AgentSharedUpdateAppendCommand,
+  AgentContractUpsertCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -683,6 +772,12 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  AgentPlanCreateCommand,
+  AgentPlanUpdateCommand,
+  AgentPlanStatusSetCommand,
+  AgentTaskUpsertCommand,
+  AgentSharedUpdateAppendCommand,
+  AgentContractUpsertCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -791,10 +886,16 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "agent-plan.created",
+  "agent-plan.updated",
+  "agent-plan.status-changed",
+  "agent-task.upserted",
+  "agent-shared-update.appended",
+  "agent-contract.upserted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "thread", "agent-plan"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -965,6 +1066,49 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const AgentPlanCreatedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  title: TrimmedNonEmptyString,
+  userPrompt: TrimmedNonEmptyString,
+  status: AgentPlanStatus,
+  projectIds: Schema.Array(ProjectId),
+  primaryProjectId: Schema.NullOr(ProjectId),
+  ownerThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const AgentPlanUpdatedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  userPrompt: Schema.optional(TrimmedNonEmptyString),
+  projectIds: Schema.optional(Schema.Array(ProjectId)),
+  primaryProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  ownerThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  updatedAt: IsoDateTime,
+});
+
+export const AgentPlanStatusChangedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  status: AgentPlanStatus,
+  updatedAt: IsoDateTime,
+});
+
+export const AgentTaskUpsertedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  task: AgentTask,
+});
+
+export const AgentSharedUpdateAppendedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  update: AgentSharedUpdate,
+});
+
+export const AgentContractUpsertedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  contract: AgentContract,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -978,7 +1122,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, AgentPlanId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1097,6 +1241,36 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-plan.created"),
+    payload: AgentPlanCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-plan.updated"),
+    payload: AgentPlanUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-plan.status-changed"),
+    payload: AgentPlanStatusChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-task.upserted"),
+    payload: AgentTaskUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-shared-update.appended"),
+    payload: AgentSharedUpdateAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-contract.upserted"),
+    payload: AgentContractUpsertedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -1111,6 +1285,18 @@ export const OrchestrationThreadStreamItem = Schema.Union([
   }),
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
+
+export const OrchestrationAgentPlanStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: AgentPlanDetailSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+  }),
+]);
+export type OrchestrationAgentPlanStreamItem = typeof OrchestrationAgentPlanStreamItem.Type;
 
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
@@ -1206,6 +1392,9 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationGetAgentPlanResult = AgentPlanDetailSnapshot;
+export type OrchestrationGetAgentPlanResult = typeof OrchestrationGetAgentPlanResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1226,6 +1415,14 @@ export const OrchestrationRpcSchemas = {
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
+  },
+  getAgentPlan: {
+    input: OrchestrationGetAgentPlanInput,
+    output: OrchestrationGetAgentPlanResult,
+  },
+  subscribeAgentPlan: {
+    input: OrchestrationSubscribeAgentPlanInput,
+    output: OrchestrationAgentPlanStreamItem,
   },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,

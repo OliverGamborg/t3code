@@ -54,6 +54,7 @@ const BASE_SNAPSHOT: OrchestrationShellSnapshot = {
       hasActionableProposedPlan: false,
     },
   ],
+  agentPlans: [],
 };
 
 const TARGET = { environmentId: EnvironmentId.make("env-local") } as const;

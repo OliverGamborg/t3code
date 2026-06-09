@@ -1,6 +1,8 @@
 import type {
   EnvironmentId,
   MessageId,
+  AgentPlanId,
+  AgentPlanShell,
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
   OrchestrationLatestTurn,
@@ -25,6 +27,7 @@ import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
 import {
   type ChatMessage,
+  type AgentPlanSummary,
   type Project,
   type ProposedPlan,
   type SidebarThreadSummary,
@@ -92,6 +95,8 @@ export interface EnvironmentState {
   // truth for sidebar data.
   // ---------------------------------------------------------------------------
   sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
+  agentPlanIds: AgentPlanId[];
+  agentPlanShellById: Record<AgentPlanId, AgentPlanSummary>;
 
   bootstrapComplete: boolean;
 }
@@ -118,6 +123,8 @@ const initialEnvironmentState: EnvironmentState = {
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
   sidebarThreadSummaryById: {},
+  agentPlanIds: [],
+  agentPlanShellById: {},
   bootstrapComplete: false,
 };
 
@@ -233,6 +240,14 @@ function mapProject(
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
+  };
+}
+
+function mapAgentPlanShell(plan: AgentPlanShell, environmentId: EnvironmentId): AgentPlanSummary {
+  return {
+    ...plan,
+    environmentId,
+    projectIds: [...plan.projectIds],
   };
 }
 
@@ -438,6 +453,30 @@ function threadTurnStatesEqual(left: ThreadTurnState | undefined, right: ThreadT
     left !== undefined &&
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     sourceProposedPlansEqual(left.pendingSourceProposedPlan, right.pendingSourceProposedPlan)
+  );
+}
+
+function agentPlanSummariesEqual(
+  left: AgentPlanSummary | undefined,
+  right: AgentPlanSummary,
+): boolean {
+  return (
+    left !== undefined &&
+    left.id === right.id &&
+    left.environmentId === right.environmentId &&
+    left.title === right.title &&
+    left.status === right.status &&
+    arraysEqual(left.projectIds, right.projectIds) &&
+    left.primaryProjectId === right.primaryProjectId &&
+    left.ownerThreadId === right.ownerThreadId &&
+    left.taskCount === right.taskCount &&
+    left.runningTaskCount === right.runningTaskCount &&
+    left.blockedTaskCount === right.blockedTaskCount &&
+    left.doneTaskCount === right.doneTaskCount &&
+    left.contractCount === right.contractCount &&
+    left.updateCount === right.updateCount &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt
   );
 }
 
@@ -767,6 +806,33 @@ function writeThreadShellState(
   return nextState;
 }
 
+function writeAgentPlanShellState(
+  state: EnvironmentState,
+  nextPlan: AgentPlanSummary,
+): EnvironmentState {
+  const previousPlan = state.agentPlanShellById[nextPlan.id];
+  let nextState = state;
+
+  if (!state.agentPlanIds.includes(nextPlan.id)) {
+    nextState = {
+      ...nextState,
+      agentPlanIds: [...nextState.agentPlanIds, nextPlan.id],
+    };
+  }
+
+  if (!agentPlanSummariesEqual(previousPlan, nextPlan)) {
+    nextState = {
+      ...nextState,
+      agentPlanShellById: {
+        ...nextState.agentPlanShellById,
+        [nextPlan.id]: nextPlan,
+      },
+    };
+  }
+
+  return nextState;
+}
+
 function retainThreadScopedRecord<T>(
   record: Record<ThreadId, T>,
   nextThreadIds: ReadonlySet<ThreadId>,
@@ -830,6 +896,18 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     turnDiffIdsByThreadId,
     turnDiffSummaryByThreadId,
     sidebarThreadSummaryById,
+  };
+}
+
+function removeAgentPlanShellState(state: EnvironmentState, planId: AgentPlanId): EnvironmentState {
+  if (!state.agentPlanShellById[planId]) {
+    return state;
+  }
+  const { [planId]: _removedPlan, ...agentPlanShellById } = state.agentPlanShellById;
+  return {
+    ...state,
+    agentPlanIds: removeId(state.agentPlanIds, planId),
+    agentPlanShellById,
   };
 }
 
@@ -1120,6 +1198,8 @@ function syncEnvironmentShellSnapshot(
     threadSessionById: {},
     threadTurnStateById: {},
     sidebarThreadSummaryById: {},
+    agentPlanIds: [],
+    agentPlanShellById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
@@ -1139,6 +1219,9 @@ function syncEnvironmentShellSnapshot(
 
   for (const thread of snapshot.threads) {
     nextState = writeThreadShellState(nextState, mapThreadShell(thread, environmentId));
+  }
+  for (const plan of snapshot.agentPlans) {
+    nextState = writeAgentPlanShellState(nextState, mapAgentPlanShell(plan, environmentId));
   }
 
   return nextState;
@@ -1765,6 +1848,10 @@ function applyEnvironmentShellEvent(
       return writeThreadShellState(state, mapThreadShell(event.thread, environmentId));
     case "thread-removed":
       return removeThreadState(state, event.threadId);
+    case "agent-plan-upserted":
+      return writeAgentPlanShellState(state, mapAgentPlanShell(event.plan, environmentId));
+    case "agent-plan-removed":
+      return removeAgentPlanShellState(state, event.planId);
   }
 }
 
@@ -1842,6 +1929,26 @@ export function selectSidebarThreadsAcrossEnvironments(state: AppState): Sidebar
       return thread && thread.environmentId === environmentId ? [thread] : [];
     }),
   );
+}
+
+export function selectAgentPlansAcrossEnvironments(state: AppState): AgentPlanSummary[] {
+  return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
+    environmentState.agentPlanIds.flatMap((planId) => {
+      const plan = environmentState.agentPlanShellById[planId];
+      return plan && plan.environmentId === environmentId ? [plan] : [];
+    }),
+  );
+}
+
+export function selectAgentPlansForEnvironment(
+  state: AppState,
+  environmentId: EnvironmentId | null | undefined,
+): AgentPlanSummary[] {
+  const environmentState = selectEnvironmentState(state, environmentId);
+  return environmentState.agentPlanIds.flatMap((planId) => {
+    const plan = environmentState.agentPlanShellById[planId];
+    return plan ? [plan] : [];
+  });
 }
 
 export function selectSidebarThreadsForProjectRef(

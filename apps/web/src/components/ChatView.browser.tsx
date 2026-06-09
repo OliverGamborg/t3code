@@ -264,9 +264,14 @@ function createMockEnvironmentApi(input: {
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],
+      getAgentPlan: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["getAgentPlan"],
       subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
+      subscribeAgentPlan: (() => () =>
+        undefined) as EnvironmentApi["orchestration"]["subscribeAgentPlan"],
     },
   };
 }
@@ -384,6 +389,7 @@ function createSnapshotForTargetUser(options: {
         deletedAt: null,
       },
     ],
+    agentPlans: [],
     threads: [
       {
         id: THREAD_ID,

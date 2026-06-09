@@ -38,6 +38,18 @@ export function applyShellStreamEvent(
         threads: Arr.filter(snapshot.threads, (t) => t.id !== event.threadId),
         snapshotSequence: event.sequence,
       };
+    case "agent-plan-upserted": {
+      const agentPlans = snapshot.agentPlans.some((p) => p.id === event.plan.id)
+        ? Arr.map(snapshot.agentPlans, (p) => (p.id === event.plan.id ? event.plan : p))
+        : Arr.append(snapshot.agentPlans, event.plan);
+      return { ...snapshot, agentPlans, snapshotSequence: event.sequence };
+    }
+    case "agent-plan-removed":
+      return {
+        ...snapshot,
+        agentPlans: Arr.filter(snapshot.agentPlans, (p) => p.id !== event.planId),
+        snapshotSequence: event.sequence,
+      };
     default:
       return snapshot;
   }

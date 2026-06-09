@@ -53,10 +53,13 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
+      getAgentPlan: rpcClient.orchestration.getAgentPlan,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
+      subscribeAgentPlan: (input, callback, options) =>
+        rpcClient.orchestration.subscribeAgentPlan(input, callback, options),
     },
   };
 }

@@ -1,4 +1,8 @@
 import {
+  AgentContractId,
+  AgentPlanId,
+  AgentSharedUpdateId,
+  AgentTaskId,
   CommandId,
   EventId,
   ProjectId,
@@ -6,6 +10,7 @@ import {
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
+import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -28,7 +33,9 @@ function makeEvent(input: {
     aggregateId:
       input.aggregateKind === "project"
         ? ProjectId.make(input.aggregateId)
-        : ThreadId.make(input.aggregateId),
+        : input.aggregateKind === "agent-plan"
+          ? AgentPlanId.make(input.aggregateId)
+          : ThreadId.make(input.aggregateId),
     occurredAt: input.occurredAt,
     commandId: input.commandId === null ? null : CommandId.make(input.commandId),
     causationEventId: null,
@@ -952,4 +959,129 @@ describe("orchestration projector", () => {
     expect(thread?.checkpoints[0]?.turnId).toBe("turn-100");
     expect(thread?.checkpoints.at(-1)?.turnId).toBe("turn-599");
   });
+
+  effectIt("applies agent plan task, update, and contract events", () =>
+    Effect.gen(function* () {
+      const now = "2026-03-02T10:00:00.000Z";
+      const model = createEmptyReadModel(now);
+      const planId = AgentPlanId.make("agent-plan-projector");
+      const taskId = AgentTaskId.make("agent-task-projector");
+      const updateId = AgentSharedUpdateId.make("agent-update-projector");
+      const contractId = AgentContractId.make("agent-contract-projector");
+
+      const events: ReadonlyArray<OrchestrationEvent> = [
+        makeEvent({
+          sequence: 1,
+          type: "agent-plan.created",
+          aggregateKind: "agent-plan",
+          aggregateId: planId,
+          occurredAt: now,
+          commandId: "cmd-agent-plan-create",
+          payload: {
+            planId,
+            title: "Owner plan",
+            userPrompt: "Coordinate archive work",
+            status: "draft",
+            projectIds: [ProjectId.make("project-1")],
+            primaryProjectId: ProjectId.make("project-1"),
+            ownerThreadId: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+        makeEvent({
+          sequence: 2,
+          type: "agent-task.upserted",
+          aggregateKind: "agent-plan",
+          aggregateId: planId,
+          occurredAt: now,
+          commandId: "cmd-agent-task-upsert",
+          payload: {
+            planId,
+            task: {
+              id: taskId,
+              planId,
+              title: "Backend task",
+              description: "Add archive API",
+              status: "running",
+              projectId: ProjectId.make("project-1"),
+              workerThreadId: null,
+              worktreePath: null,
+              branchName: null,
+              allowedPaths: ["apps/server/src"],
+              blockedPaths: [".repos"],
+              dependsOn: [],
+              relatedTaskIds: [],
+              requiredContracts: [],
+              producedContracts: [contractId],
+              assignedProvider: "codex",
+              summary: null,
+              riskNotes: null,
+              createdAt: now,
+              updatedAt: "2026-03-02T10:00:01.000Z",
+            },
+          },
+        }),
+        makeEvent({
+          sequence: 3,
+          type: "agent-shared-update.appended",
+          aggregateKind: "agent-plan",
+          aggregateId: planId,
+          occurredAt: "2026-03-02T10:00:02.000Z",
+          commandId: "cmd-agent-update-append",
+          payload: {
+            planId,
+            update: {
+              id: updateId,
+              planId,
+              taskId,
+              type: "progress",
+              title: "API started",
+              body: "Endpoint wiring is in progress.",
+              visibility: "all_workers",
+              relatedTaskIds: [],
+              createdAt: "2026-03-02T10:00:02.000Z",
+            },
+          },
+        }),
+        makeEvent({
+          sequence: 4,
+          type: "agent-contract.upserted",
+          aggregateKind: "agent-plan",
+          aggregateId: planId,
+          occurredAt: "2026-03-02T10:00:03.000Z",
+          commandId: "cmd-agent-contract-upsert",
+          payload: {
+            planId,
+            contract: {
+              id: contractId,
+              planId,
+              producerTaskId: taskId,
+              consumerTaskIds: [],
+              type: "api",
+              title: "Archive response shape",
+              description: "Archive endpoint returns archivedAt.",
+              status: "accepted",
+              version: 1,
+              createdAt: "2026-03-02T10:00:03.000Z",
+              updatedAt: "2026-03-02T10:00:03.000Z",
+            },
+          },
+        }),
+      ];
+
+      let finalState = model;
+      for (const event of events) {
+        finalState = yield* projectEvent(finalState, event);
+      }
+
+      const plan = finalState.agentPlans[0];
+      expect(plan?.id).toBe(planId);
+      expect(plan?.tasks.map((task) => task.id)).toEqual([taskId]);
+      expect(plan?.tasks[0]?.allowedPaths).toEqual(["apps/server/src"]);
+      expect(plan?.sharedUpdates.map((update) => update.id)).toEqual([updateId]);
+      expect(plan?.contracts.map((contract) => contract.id)).toEqual([contractId]);
+      expect(plan?.updatedAt).toBe("2026-03-02T10:00:03.000Z");
+    }),
+  );
 });

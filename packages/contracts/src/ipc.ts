@@ -56,13 +56,17 @@ import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from ".
 import * as Schema from "effect/Schema";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationGetAgentPlanInput,
+  OrchestrationGetAgentPlanResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamItem,
+  OrchestrationSubscribeAgentPlanInput,
   OrchestrationSubscribeThreadInput,
+  OrchestrationAgentPlanStreamItem,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
@@ -605,6 +609,9 @@ export interface EnvironmentApi {
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
+    getAgentPlan: (
+      input: OrchestrationGetAgentPlanInput,
+    ) => Promise<OrchestrationGetAgentPlanResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {
@@ -614,6 +621,13 @@ export interface EnvironmentApi {
     subscribeThread: (
       input: OrchestrationSubscribeThreadInput,
       callback: (event: OrchestrationThreadStreamItem) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    subscribeAgentPlan: (
+      input: OrchestrationSubscribeAgentPlanInput,
+      callback: (event: OrchestrationAgentPlanStreamItem) => void,
       options?: {
         onResubscribe?: () => void;
       },

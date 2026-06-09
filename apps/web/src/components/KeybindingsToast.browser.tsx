@@ -189,6 +189,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         deletedAt: null,
       },
     ],
+    agentPlans: [],
     threads: [
       {
         id: THREAD_ID,

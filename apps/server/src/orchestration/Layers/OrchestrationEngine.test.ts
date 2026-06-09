@@ -129,6 +129,7 @@ describe("OrchestrationEngine", () => {
           deletedAt: null,
         },
       ],
+      agentPlans: [],
       threads: [
         {
           id: ThreadId.make("thread-bootstrap"),
@@ -180,6 +181,7 @@ describe("OrchestrationEngine", () => {
             Effect.succeed({
               snapshotSequence: projectionSnapshot.snapshotSequence,
               projects: [],
+              agentPlans: [],
               threads: [],
               updatedAt: projectionSnapshot.updatedAt,
             }),
@@ -187,6 +189,7 @@ describe("OrchestrationEngine", () => {
             Effect.succeed({
               snapshotSequence: projectionSnapshot.snapshotSequence,
               projects: [],
+              agentPlans: [],
               threads: [],
               updatedAt: projectionSnapshot.updatedAt,
             }),
@@ -200,6 +203,8 @@ describe("OrchestrationEngine", () => {
           getFullThreadDiffContext: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
+          getAgentPlanShellById: () => Effect.succeed(Option.none()),
+          getAgentPlanDetailById: () => Effect.succeed(Option.none()),
         }),
       ),
       Layer.provide(

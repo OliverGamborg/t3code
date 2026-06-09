@@ -22,6 +22,7 @@ import {
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
 } from "./orchestration.ts";
+import { AgentPlan, AgentPlanShell, AgentTask } from "./agentPlan.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
@@ -49,6 +50,9 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeAgentPlan = Schema.decodeUnknownEffect(AgentPlan);
+const decodeAgentPlanShell = Schema.decodeUnknownEffect(AgentPlanShell);
+const decodeAgentTask = Schema.decodeUnknownEffect(AgentTask);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -59,6 +63,75 @@ it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
     });
     assert.strictEqual(parsed.fromTurnCount, 1);
     assert.strictEqual(parsed.toTurnCount, 2);
+  }),
+);
+
+it.effect("decodes agent plan records with default child state", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeAgentPlan({
+      id: "plan-1",
+      title: "Owner plan",
+      userPrompt: "Implement archive support",
+      status: "draft",
+      projectIds: ["project-1"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.tasks, []);
+    assert.deepStrictEqual(parsed.sharedUpdates, []);
+    assert.deepStrictEqual(parsed.contracts, []);
+    assert.strictEqual(parsed.primaryProjectId, null);
+    assert.strictEqual(parsed.ownerThreadId, null);
+    assert.strictEqual(parsed.deletedAt, null);
+  }),
+);
+
+it.effect("decodes agent task records with default coordination fields", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeAgentTask({
+      id: "task-1",
+      planId: "plan-1",
+      title: "Backend task",
+      description: "Add archive endpoint",
+      status: "pending",
+      projectId: "project-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.allowedPaths, []);
+    assert.deepStrictEqual(parsed.blockedPaths, []);
+    assert.deepStrictEqual(parsed.dependsOn, []);
+    assert.deepStrictEqual(parsed.relatedTaskIds, []);
+    assert.deepStrictEqual(parsed.requiredContracts, []);
+    assert.deepStrictEqual(parsed.producedContracts, []);
+    assert.strictEqual(parsed.workerThreadId, null);
+  }),
+);
+
+it.effect("rejects empty agent plan shell titles", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeAgentPlanShell({
+        id: "plan-1",
+        title: " ",
+        status: "draft",
+        projectIds: ["project-1"],
+        primaryProjectId: null,
+        ownerThreadId: null,
+        taskCount: 0,
+        runningTaskCount: 0,
+        blockedTaskCount: 0,
+        doneTaskCount: 0,
+        contractCount: 0,
+        updateCount: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
   }),
 );
 

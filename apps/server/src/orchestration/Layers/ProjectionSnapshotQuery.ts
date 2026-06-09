@@ -1,4 +1,13 @@
 import {
+  AgentContract,
+  AgentContractId,
+  AgentPlan,
+  AgentPlanDetailSnapshot,
+  AgentPlanId,
+  AgentPlanShell,
+  AgentSharedUpdate,
+  AgentTask,
+  AgentTaskId,
   ChatAttachment,
   CheckpointRef,
   IsoDateTime,
@@ -43,6 +52,7 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
+import { ProjectionAgentPlan } from "../../persistence/Services/ProjectionAgentPlans.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
@@ -61,6 +71,8 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeAgentPlan = Schema.decodeUnknownEffect(AgentPlan);
+const decodeAgentPlanDetailSnapshot = Schema.decodeUnknownEffect(AgentPlanDetailSnapshot);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
@@ -91,6 +103,31 @@ const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
 );
+const ProjectionAgentPlanDbRowSchema = ProjectionAgentPlan.mapFields(
+  Struct.assign({
+    projectIds: Schema.fromJsonString(Schema.Array(ProjectId)),
+  }),
+);
+const ProjectionAgentTaskDbRowSchema = AgentTask.mapFields(
+  Struct.assign({
+    allowedPaths: Schema.fromJsonString(Schema.Array(Schema.String)),
+    blockedPaths: Schema.fromJsonString(Schema.Array(Schema.String)),
+    dependsOn: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+    relatedTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+    requiredContracts: Schema.fromJsonString(Schema.Array(AgentContractId)),
+    producedContracts: Schema.fromJsonString(Schema.Array(AgentContractId)),
+  }),
+);
+const ProjectionAgentSharedUpdateDbRowSchema = AgentSharedUpdate.mapFields(
+  Struct.assign({
+    relatedTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+  }),
+);
+const ProjectionAgentContractDbRowSchema = AgentContract.mapFields(
+  Struct.assign({
+    consumerTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
+  }),
+);
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
   turnId: TurnId,
@@ -115,6 +152,9 @@ const ProjectIdLookupInput = Schema.Struct({
 });
 const ThreadIdLookupInput = Schema.Struct({
   threadId: ThreadId,
+});
+const AgentPlanIdLookupInput = Schema.Struct({
+  planId: AgentPlanId,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -147,6 +187,7 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+  ORCHESTRATION_PROJECTOR_NAMES.agentPlans,
 ] as const;
 
 function maxIso(left: string | null, right: string): string {
@@ -250,6 +291,54 @@ function mapProposedPlanRow(
     implementationThreadId: row.implementationThreadId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function mapAgentPlan(input: {
+  readonly row: Schema.Schema.Type<typeof ProjectionAgentPlanDbRowSchema>;
+  readonly tasks?: ReadonlyArray<AgentTask>;
+  readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
+  readonly contracts?: ReadonlyArray<AgentContract>;
+}): AgentPlan {
+  return {
+    id: input.row.planId,
+    title: input.row.title,
+    userPrompt: input.row.userPrompt,
+    status: input.row.status,
+    projectIds: input.row.projectIds,
+    primaryProjectId: input.row.primaryProjectId,
+    ownerThreadId: input.row.ownerThreadId,
+    createdAt: input.row.createdAt,
+    updatedAt: input.row.updatedAt,
+    deletedAt: input.row.deletedAt,
+    tasks: [...(input.tasks ?? [])],
+    sharedUpdates: [...(input.sharedUpdates ?? [])],
+    contracts: [...(input.contracts ?? [])],
+  };
+}
+
+function mapAgentPlanShell(input: {
+  readonly row: Schema.Schema.Type<typeof ProjectionAgentPlanDbRowSchema>;
+  readonly tasks?: ReadonlyArray<AgentTask>;
+  readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
+  readonly contracts?: ReadonlyArray<AgentContract>;
+}): AgentPlanShell {
+  const tasks = input.tasks ?? [];
+  return {
+    id: input.row.planId,
+    title: input.row.title,
+    status: input.row.status,
+    projectIds: input.row.projectIds,
+    primaryProjectId: input.row.primaryProjectId,
+    ownerThreadId: input.row.ownerThreadId,
+    taskCount: tasks.length,
+    runningTaskCount: tasks.filter((task) => task.status === "running").length,
+    blockedTaskCount: tasks.filter((task) => task.status === "blocked").length,
+    doneTaskCount: tasks.filter((task) => task.status === "done").length,
+    contractCount: input.contracts?.length ?? 0,
+    updateCount: input.sharedUpdates?.length ?? 0,
+    createdAt: input.row.createdAt,
+    updatedAt: input.row.updatedAt,
   };
 }
 
@@ -657,6 +746,221 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listAgentPlanRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentPlanDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          plan_id AS "planId",
+          title,
+          user_prompt AS "userPrompt",
+          status,
+          owner_thread_id AS "ownerThreadId",
+          primary_project_id AS "primaryProjectId",
+          project_ids_json AS "projectIds",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_agent_plans
+        ORDER BY created_at ASC, plan_id ASC
+      `,
+  });
+
+  const listActiveAgentPlanRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentPlanDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          plan_id AS "planId",
+          title,
+          user_prompt AS "userPrompt",
+          status,
+          owner_thread_id AS "ownerThreadId",
+          primary_project_id AS "primaryProjectId",
+          project_ids_json AS "projectIds",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_agent_plans
+        WHERE deleted_at IS NULL
+        ORDER BY updated_at DESC, plan_id ASC
+      `,
+  });
+
+  const getActiveAgentPlanRowById = SqlSchema.findOneOption({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentPlanDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          plan_id AS "planId",
+          title,
+          user_prompt AS "userPrompt",
+          status,
+          owner_thread_id AS "ownerThreadId",
+          primary_project_id AS "primaryProjectId",
+          project_ids_json AS "projectIds",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_agent_plans
+        WHERE plan_id = ${planId}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `,
+  });
+
+  const listAgentTaskRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentTaskDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          task_id AS "id",
+          plan_id AS "planId",
+          title,
+          description,
+          status,
+          project_id AS "projectId",
+          worker_thread_id AS "workerThreadId",
+          worktree_path AS "worktreePath",
+          branch_name AS "branchName",
+          allowed_paths_json AS "allowedPaths",
+          blocked_paths_json AS "blockedPaths",
+          depends_on_json AS "dependsOn",
+          related_task_ids_json AS "relatedTaskIds",
+          required_contract_ids_json AS "requiredContracts",
+          produced_contract_ids_json AS "producedContracts",
+          assigned_provider AS "assignedProvider",
+          summary,
+          risk_notes AS "riskNotes",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_agent_tasks
+        ORDER BY plan_id ASC, created_at ASC, task_id ASC
+      `,
+  });
+
+  const listAgentTaskRowsByPlan = SqlSchema.findAll({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentTaskDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          task_id AS "id",
+          plan_id AS "planId",
+          title,
+          description,
+          status,
+          project_id AS "projectId",
+          worker_thread_id AS "workerThreadId",
+          worktree_path AS "worktreePath",
+          branch_name AS "branchName",
+          allowed_paths_json AS "allowedPaths",
+          blocked_paths_json AS "blockedPaths",
+          depends_on_json AS "dependsOn",
+          related_task_ids_json AS "relatedTaskIds",
+          required_contract_ids_json AS "requiredContracts",
+          produced_contract_ids_json AS "producedContracts",
+          assigned_provider AS "assignedProvider",
+          summary,
+          risk_notes AS "riskNotes",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_agent_tasks
+        WHERE plan_id = ${planId}
+        ORDER BY created_at ASC, task_id ASC
+      `,
+  });
+
+  const listAgentSharedUpdateRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentSharedUpdateDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          update_id AS "id",
+          plan_id AS "planId",
+          task_id AS "taskId",
+          type,
+          title,
+          body,
+          visibility,
+          related_task_ids_json AS "relatedTaskIds",
+          created_at AS "createdAt"
+        FROM projection_agent_shared_updates
+        ORDER BY plan_id ASC, created_at ASC, update_id ASC
+      `,
+  });
+
+  const listAgentSharedUpdateRowsByPlan = SqlSchema.findAll({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentSharedUpdateDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          update_id AS "id",
+          plan_id AS "planId",
+          task_id AS "taskId",
+          type,
+          title,
+          body,
+          visibility,
+          related_task_ids_json AS "relatedTaskIds",
+          created_at AS "createdAt"
+        FROM projection_agent_shared_updates
+        WHERE plan_id = ${planId}
+        ORDER BY created_at ASC, update_id ASC
+      `,
+  });
+
+  const listAgentContractRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentContractDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          contract_id AS "id",
+          plan_id AS "planId",
+          producer_task_id AS "producerTaskId",
+          consumer_task_ids_json AS "consumerTaskIds",
+          type,
+          title,
+          description,
+          status,
+          version,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_agent_contracts
+        ORDER BY plan_id ASC, created_at ASC, contract_id ASC
+      `,
+  });
+
+  const listAgentContractRowsByPlan = SqlSchema.findAll({
+    Request: AgentPlanIdLookupInput,
+    Result: ProjectionAgentContractDbRowSchema,
+    execute: ({ planId }) =>
+      sql`
+        SELECT
+          contract_id AS "id",
+          plan_id AS "planId",
+          producer_task_id AS "producerTaskId",
+          consumer_task_ids_json AS "consumerTaskIds",
+          type,
+          title,
+          description,
+          status,
+          version,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_agent_contracts
+        WHERE plan_id = ${planId}
+        ORDER BY created_at ASC, contract_id ASC
+      `,
+  });
+
   const getActiveProjectRowByWorkspaceRoot = SqlSchema.findOneOption({
     Request: WorkspaceRootLookupInput,
     Result: ProjectionProjectLookupRowSchema,
@@ -998,6 +1302,38 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listAgentPlanRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listAgentPlans:query",
+                "ProjectionSnapshotQuery.getSnapshot:listAgentPlans:decodeRows",
+              ),
+            ),
+          ),
+          listAgentTaskRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listAgentTasks:query",
+                "ProjectionSnapshotQuery.getSnapshot:listAgentTasks:decodeRows",
+              ),
+            ),
+          ),
+          listAgentSharedUpdateRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listAgentSharedUpdates:query",
+                "ProjectionSnapshotQuery.getSnapshot:listAgentSharedUpdates:decodeRows",
+              ),
+            ),
+          ),
+          listAgentContractRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listAgentContracts:query",
+                "ProjectionSnapshotQuery.getSnapshot:listAgentContracts:decodeRows",
+              ),
+            ),
+          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1019,6 +1355,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             sessionRows,
             checkpointRows,
             latestTurnRows,
+            agentPlanRows,
+            agentTaskRows,
+            agentSharedUpdateRows,
+            agentContractRows,
             stateRows,
           ]) =>
             Effect.gen(function* () {
@@ -1028,6 +1368,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
               const sessionsByThread = new Map<string, OrchestrationSession>();
               const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
+              const tasksByPlan = new Map<string, Array<AgentTask>>();
+              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
+              const contractsByPlan = new Map<string, Array<AgentContract>>();
 
               let updatedAt: string | null = null;
 
@@ -1039,6 +1382,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }
               for (const row of stateRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const row of agentPlanRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const row of agentTaskRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const tasks = tasksByPlan.get(row.planId) ?? [];
+                tasks.push(row);
+                tasksByPlan.set(row.planId, tasks);
+              }
+              for (const row of agentSharedUpdateRows) {
+                updatedAt = maxIso(updatedAt, row.createdAt);
+                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
+                sharedUpdates.push(row);
+                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
+              }
+              for (const row of agentContractRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const contracts = contractsByPlan.get(row.planId) ?? [];
+                contracts.push(row);
+                contractsByPlan.set(row.planId, contracts);
               }
 
               for (const row of messageRows) {
@@ -1193,10 +1557,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 session: sessionsByThread.get(row.threadId) ?? null,
               }));
 
+              const agentPlans: ReadonlyArray<AgentPlan> = agentPlanRows.map((row) =>
+                mapAgentPlan({
+                  row,
+                  tasks: tasksByPlan.get(row.planId) ?? [],
+                  sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
+                  contracts: contractsByPlan.get(row.planId) ?? [],
+                }),
+              );
+
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                agentPlans,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -1259,6 +1633,38 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listAgentPlanRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentPlans:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentPlans:decodeRows",
+              ),
+            ),
+          ),
+          listAgentTaskRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentTasks:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentTasks:decodeRows",
+              ),
+            ),
+          ),
+          listAgentSharedUpdateRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentSharedUpdates:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentSharedUpdates:decodeRows",
+              ),
+            ),
+          ),
+          listAgentContractRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentContracts:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgentContracts:decodeRows",
+              ),
+            ),
+          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1271,11 +1677,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            proposedPlanRows,
+            sessionRows,
+            latestTurnRows,
+            agentPlanRows,
+            agentTaskRows,
+            agentSharedUpdateRows,
+            agentContractRows,
+            stateRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
+              const tasksByPlan = new Map<string, Array<AgentTask>>();
+              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
+              const contractsByPlan = new Map<string, Array<AgentContract>>();
 
               for (let index = 0; index < projectRows.length; index += 1) {
                 const row = projectRows[index];
@@ -1327,6 +1747,43 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 if (row.completedAt !== null) {
                   updatedAt = maxIso(updatedAt, row.completedAt);
                 }
+              }
+              for (let index = 0; index < agentPlanRows.length; index += 1) {
+                const row = agentPlanRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (let index = 0; index < agentTaskRows.length; index += 1) {
+                const row = agentTaskRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const tasks = tasksByPlan.get(row.planId) ?? [];
+                tasks.push(row);
+                tasksByPlan.set(row.planId, tasks);
+              }
+              for (let index = 0; index < agentSharedUpdateRows.length; index += 1) {
+                const row = agentSharedUpdateRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.createdAt);
+                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
+                sharedUpdates.push(row);
+                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
+              }
+              for (let index = 0; index < agentContractRows.length; index += 1) {
+                const row = agentContractRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const contracts = contractsByPlan.get(row.planId) ?? [];
+                contracts.push(row);
+                contractsByPlan.set(row.planId, contracts);
               }
               for (let index = 0; index < stateRows.length; index += 1) {
                 const row = stateRows[index];
@@ -1392,10 +1849,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 });
               }
 
+              const agentPlans: AgentPlan[] = agentPlanRows.map((row) =>
+                mapAgentPlan({
+                  row,
+                  tasks: tasksByPlan.get(row.planId) ?? [],
+                  sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
+                  contracts: contractsByPlan.get(row.planId) ?? [],
+                }),
+              );
+
               return {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                agentPlans,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),
@@ -1444,6 +1911,38 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listActiveAgentPlanRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlans:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlans:decodeRows",
+              ),
+            ),
+          ),
+          listAgentTaskRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentTasks:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentTasks:decodeRows",
+              ),
+            ),
+          ),
+          listAgentSharedUpdateRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentSharedUpdates:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentSharedUpdates:decodeRows",
+              ),
+            ),
+          ),
+          listAgentContractRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentContracts:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgentContracts:decodeRows",
+              ),
+            ),
+          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1455,82 +1954,136 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
-          Effect.gen(function* () {
-            let updatedAt: string | null = null;
-            for (const row of projectRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of threadRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of sessionRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of latestTurnRows) {
-              updatedAt = maxIso(updatedAt, row.requestedAt);
-              if (row.startedAt !== null) {
-                updatedAt = maxIso(updatedAt, row.startedAt);
+        Effect.flatMap(
+          ([
+            projectRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            agentPlanRows,
+            agentTaskRows,
+            agentSharedUpdateRows,
+            agentContractRows,
+            stateRows,
+          ]) =>
+            Effect.gen(function* () {
+              let updatedAt: string | null = null;
+              for (const row of projectRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
               }
-              if (row.completedAt !== null) {
-                updatedAt = maxIso(updatedAt, row.completedAt);
+              for (const row of threadRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
               }
-            }
-            for (const row of stateRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
+              for (const row of sessionRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const row of latestTurnRows) {
+                updatedAt = maxIso(updatedAt, row.requestedAt);
+                if (row.startedAt !== null) {
+                  updatedAt = maxIso(updatedAt, row.startedAt);
+                }
+                if (row.completedAt !== null) {
+                  updatedAt = maxIso(updatedAt, row.completedAt);
+                }
+              }
+              const activeAgentPlanIds = new Set(agentPlanRows.map((row) => row.planId));
+              const tasksByPlan = new Map<string, Array<AgentTask>>();
+              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
+              const contractsByPlan = new Map<string, Array<AgentContract>>();
+              for (const row of agentPlanRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (const row of agentTaskRows) {
+                if (!activeAgentPlanIds.has(row.planId)) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const tasks = tasksByPlan.get(row.planId) ?? [];
+                tasks.push(row);
+                tasksByPlan.set(row.planId, tasks);
+              }
+              for (const row of agentSharedUpdateRows) {
+                if (!activeAgentPlanIds.has(row.planId)) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.createdAt);
+                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
+                sharedUpdates.push(row);
+                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
+              }
+              for (const row of agentContractRows) {
+                if (!activeAgentPlanIds.has(row.planId)) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const contracts = contractsByPlan.get(row.planId) ?? [];
+                contracts.push(row);
+                contractsByPlan.set(row.planId, contracts);
+              }
+              for (const row of stateRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
 
-            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(projectRows);
-            const latestTurnByThread = new Map(
-              latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
-            );
-            const sessionByThread = new Map(
-              sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
-            );
+              const repositoryIdentities =
+                yield* resolveRepositoryIdentitiesForProjects(projectRows);
+              const latestTurnByThread = new Map(
+                latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
+              );
+              const sessionByThread = new Map(
+                sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
+              );
 
-            const snapshot = {
-              snapshotSequence: computeSnapshotSequence(stateRows),
-              projects: Arr.filterMap(projectRows, (row) =>
-                row.deletedAt === null
-                  ? Result.succeed(
-                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
-                    )
-                  : Result.failVoid,
-              ),
-              threads: Arr.filterMap(threadRows, (row) =>
-                row.deletedAt === null
-                  ? Result.succeed({
-                      id: row.threadId,
-                      projectId: row.projectId,
-                      title: row.title,
-                      modelSelection: row.modelSelection,
-                      runtimeMode: row.runtimeMode,
-                      interactionMode: row.interactionMode,
-                      branch: row.branch,
-                      worktreePath: row.worktreePath,
-                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                      createdAt: row.createdAt,
-                      updatedAt: row.updatedAt,
-                      archivedAt: row.archivedAt,
-                      session: sessionByThread.get(row.threadId) ?? null,
-                      latestUserMessageAt: row.latestUserMessageAt,
-                      hasPendingApprovals: row.pendingApprovalCount > 0,
-                      hasPendingUserInput: row.pendingUserInputCount > 0,
-                      hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                    } satisfies OrchestrationThreadShell)
-                  : Result.failVoid,
-              ),
-              updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
-            };
-
-            return yield* decodeShellSnapshot(snapshot).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(
-                  "ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot",
+              const snapshot = {
+                snapshotSequence: computeSnapshotSequence(stateRows),
+                projects: Arr.filterMap(projectRows, (row) =>
+                  row.deletedAt === null
+                    ? Result.succeed(
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                      )
+                    : Result.failVoid,
                 ),
-              ),
-            );
-          }),
+                threads: Arr.filterMap(threadRows, (row) =>
+                  row.deletedAt === null
+                    ? Result.succeed({
+                        id: row.threadId,
+                        projectId: row.projectId,
+                        title: row.title,
+                        modelSelection: row.modelSelection,
+                        runtimeMode: row.runtimeMode,
+                        interactionMode: row.interactionMode,
+                        branch: row.branch,
+                        worktreePath: row.worktreePath,
+                        latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                        createdAt: row.createdAt,
+                        updatedAt: row.updatedAt,
+                        archivedAt: row.archivedAt,
+                        session: sessionByThread.get(row.threadId) ?? null,
+                        latestUserMessageAt: row.latestUserMessageAt,
+                        hasPendingApprovals: row.pendingApprovalCount > 0,
+                        hasPendingUserInput: row.pendingUserInputCount > 0,
+                        hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                      } satisfies OrchestrationThreadShell)
+                    : Result.failVoid,
+                ),
+                agentPlans: agentPlanRows.map((row) =>
+                  mapAgentPlanShell({
+                    row,
+                    tasks: tasksByPlan.get(row.planId) ?? [],
+                    sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
+                    contracts: contractsByPlan.get(row.planId) ?? [],
+                  }),
+                ),
+                updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
+              };
+
+              return yield* decodeShellSnapshot(snapshot).pipe(
+                Effect.mapError(
+                  toPersistenceDecodeError(
+                    "ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot",
+                  ),
+                ),
+              );
+            }),
         ),
         Effect.mapError((error) => {
           if (isPersistenceError(error)) {
@@ -2033,6 +2586,133 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
+  const getAgentPlanShellById: ProjectionSnapshotQueryShape["getAgentPlanShellById"] = (planId) =>
+    Effect.gen(function* () {
+      const [planRow, taskRows, sharedUpdateRows, contractRows] = yield* Effect.all([
+        getActiveAgentPlanRowById({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanShellById:getPlan:query",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:getPlan:decodeRow",
+            ),
+          ),
+        ),
+        listAgentTaskRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listTasks:query",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listTasks:decodeRows",
+            ),
+          ),
+        ),
+        listAgentSharedUpdateRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listUpdates:query",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listUpdates:decodeRows",
+            ),
+          ),
+        ),
+        listAgentContractRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listContracts:query",
+              "ProjectionSnapshotQuery.getAgentPlanShellById:listContracts:decodeRows",
+            ),
+          ),
+        ),
+      ]);
+
+      if (Option.isNone(planRow)) {
+        return Option.none<AgentPlanShell>();
+      }
+
+      return Option.some(
+        mapAgentPlanShell({
+          row: planRow.value,
+          tasks: taskRows,
+          sharedUpdates: sharedUpdateRows,
+          contracts: contractRows,
+        }),
+      );
+    });
+
+  const getAgentPlanDetailById: ProjectionSnapshotQueryShape["getAgentPlanDetailById"] = (planId) =>
+    Effect.gen(function* () {
+      const [planRow, taskRows, sharedUpdateRows, contractRows, stateRows] = yield* Effect.all([
+        getActiveAgentPlanRowById({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:getPlan:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:getPlan:decodeRow",
+            ),
+          ),
+        ),
+        listAgentTaskRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listTasks:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listTasks:decodeRows",
+            ),
+          ),
+        ),
+        listAgentSharedUpdateRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listUpdates:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listUpdates:decodeRows",
+            ),
+          ),
+        ),
+        listAgentContractRowsByPlan({ planId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listContracts:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listContracts:decodeRows",
+            ),
+          ),
+        ),
+        listProjectionStateRows(undefined).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listProjectionState:query",
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:listProjectionState:decodeRows",
+            ),
+          ),
+        ),
+      ]);
+
+      if (Option.isNone(planRow)) {
+        return Option.none<AgentPlanDetailSnapshot>();
+      }
+
+      const plan = yield* decodeAgentPlan(
+        mapAgentPlan({
+          row: planRow.value,
+          tasks: taskRows,
+          sharedUpdates: sharedUpdateRows,
+          contracts: contractRows,
+        }),
+      ).pipe(
+        Effect.mapError(
+          toPersistenceDecodeError("ProjectionSnapshotQuery.getAgentPlanDetailById:decodePlan"),
+        ),
+      );
+
+      return Option.some(
+        yield* decodeAgentPlanDetailSnapshot({
+          snapshotSequence: computeSnapshotSequence(stateRows),
+          plan,
+        }).pipe(
+          Effect.mapError(
+            toPersistenceDecodeError(
+              "ProjectionSnapshotQuery.getAgentPlanDetailById:decodeSnapshot",
+            ),
+          ),
+        ),
+      );
+    });
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2047,6 +2727,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getFullThreadDiffContext,
     getThreadShellById,
     getThreadDetailById,
+    getAgentPlanShellById,
+    getAgentPlanDetailById,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

@@ -12,6 +12,8 @@ import type * as PlatformError from "effect/PlatformError";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  requireAgentPlan,
+  requireAgentPlanAbsent,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -749,6 +751,214 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           activity: command.activity,
+        },
+      };
+    }
+
+    case "agent-plan.create": {
+      yield* requireAgentPlanAbsent({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.projectIds.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Agent plans must include at least one project.",
+        });
+      }
+      for (const projectId of command.projectIds) {
+        yield* requireProject({
+          readModel,
+          command,
+          projectId,
+        });
+      }
+      const primaryProjectId = command.primaryProjectId ?? command.projectIds[0] ?? null;
+      if (primaryProjectId !== null && !command.projectIds.includes(primaryProjectId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Primary project '${primaryProjectId}' must be included in agent plan projectIds.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-plan.created",
+        payload: {
+          planId: command.planId,
+          title: command.title,
+          userPrompt: command.userPrompt,
+          status: "draft",
+          projectIds: command.projectIds,
+          primaryProjectId,
+          ownerThreadId: command.ownerThreadId ?? null,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "agent-plan.update": {
+      const plan = yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      const nextProjectIds = command.projectIds ?? plan.projectIds;
+      if (nextProjectIds.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Agent plans must include at least one project.",
+        });
+      }
+      for (const projectId of nextProjectIds) {
+        yield* requireProject({
+          readModel,
+          command,
+          projectId,
+        });
+      }
+      const nextPrimaryProjectId =
+        command.primaryProjectId !== undefined ? command.primaryProjectId : plan.primaryProjectId;
+      if (nextPrimaryProjectId !== null && !nextProjectIds.includes(nextPrimaryProjectId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Primary project '${nextPrimaryProjectId}' must be included in agent plan projectIds.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-plan.updated",
+        payload: {
+          planId: command.planId,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.userPrompt !== undefined ? { userPrompt: command.userPrompt } : {}),
+          ...(command.projectIds !== undefined ? { projectIds: command.projectIds } : {}),
+          ...(command.primaryProjectId !== undefined
+            ? { primaryProjectId: command.primaryProjectId }
+            : {}),
+          ...(command.ownerThreadId !== undefined ? { ownerThreadId: command.ownerThreadId } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent-plan.status.set": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-plan.status-changed",
+        payload: {
+          planId: command.planId,
+          status: command.status,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent-task.upsert": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.task.planId !== command.planId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Task '${command.task.id}' belongs to plan '${command.task.planId}', not '${command.planId}'.`,
+        });
+      }
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.task.projectId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.task.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-task.upserted",
+        payload: {
+          planId: command.planId,
+          task: command.task,
+        },
+      };
+    }
+
+    case "agent-shared-update.append": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.update.planId !== command.planId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Shared update '${command.update.id}' belongs to plan '${command.update.planId}', not '${command.planId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.update.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-shared-update.appended",
+        payload: {
+          planId: command.planId,
+          update: command.update,
+        },
+      };
+    }
+
+    case "agent-contract.upsert": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      if (command.contract.planId !== command.planId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Contract '${command.contract.id}' belongs to plan '${command.contract.planId}', not '${command.planId}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt: command.contract.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-contract.upserted",
+        payload: {
+          planId: command.planId,
+          contract: command.contract,
         },
       };
     }

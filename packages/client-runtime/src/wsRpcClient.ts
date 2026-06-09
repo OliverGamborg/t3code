@@ -165,8 +165,12 @@ export interface WsRpcClient {
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
+    readonly getAgentPlan: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getAgentPlan>;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+    readonly subscribeAgentPlan: RpcInputStreamMethod<
+      typeof ORCHESTRATION_WS_METHODS.subscribeAgentPlan
+    >;
   };
 }
 
@@ -359,6 +363,8 @@ export function createWsRpcClient(
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]({}),
         ),
+      getAgentPlan: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getAgentPlan](input)),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),
@@ -370,6 +376,12 @@ export function createWsRpcClient(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeThread](input),
           listener,
           subscriptionOptions(options, ORCHESTRATION_WS_METHODS.subscribeThread),
+        ),
+      subscribeAgentPlan: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[ORCHESTRATION_WS_METHODS.subscribeAgentPlan](input),
+          listener,
+          subscriptionOptions(options, ORCHESTRATION_WS_METHODS.subscribeAgentPlan),
         ),
     },
   };

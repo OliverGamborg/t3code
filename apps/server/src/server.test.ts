@@ -174,6 +174,7 @@ const makeDefaultOrchestrationReadModel = () => {
         deletedAt: null,
       },
     ],
+    agentPlans: [],
     threads: [
       {
         id: defaultThreadId,
@@ -679,6 +680,7 @@ const buildAppUnderTest = (options?: {
             Effect.succeed({
               snapshotSequence: 0,
               projects: [],
+              agentPlans: [],
               threads: [],
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
@@ -686,6 +688,7 @@ const buildAppUnderTest = (options?: {
             Effect.succeed({
               snapshotSequence: 0,
               projects: [],
+              agentPlans: [],
               threads: [],
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
@@ -693,6 +696,8 @@ const buildAppUnderTest = (options?: {
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
+          getAgentPlanShellById: () => Effect.succeed(Option.none()),
+          getAgentPlanDetailById: () => Effect.succeed(Option.none()),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -5406,6 +5411,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             deletedAt: null,
           },
         ],
+        agentPlans: [],
         threads: [
           {
             id: ThreadId.make("thread-1"),

@@ -334,6 +334,7 @@ function createArchivedPanelSnapshot(
         updatedAt: "2036-04-07T00:00:00.000Z",
       },
     ],
+    agentPlans: [],
     threads,
     updatedAt: "2036-04-07T00:03:00.000Z",
   };
