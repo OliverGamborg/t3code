@@ -5,7 +5,6 @@ import {
   EventId,
   ORCHESTRATION_WS_METHODS,
   EnvironmentId,
-  type EnvironmentApi,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
@@ -70,6 +69,7 @@ import { terminalSessionManager } from "../terminalSessionState";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
+import { createMockEnvironmentApi } from "../../test/createMockEnvironmentApi";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
@@ -235,61 +235,6 @@ function createBaseServerConfig(): ServerConfig {
     settings: {
       ...DEFAULT_SERVER_SETTINGS,
       ...DEFAULT_CLIENT_SETTINGS,
-    },
-  };
-}
-
-function createMockEnvironmentApi(input: {
-  browse: EnvironmentApi["filesystem"]["browse"];
-  dispatchCommand: EnvironmentApi["orchestration"]["dispatchCommand"];
-}): EnvironmentApi {
-  return {
-    terminal: {} as EnvironmentApi["terminal"],
-    projects: {} as EnvironmentApi["projects"],
-    filesystem: {
-      browse: input.browse,
-    },
-    sourceControl: {} as EnvironmentApi["sourceControl"],
-    vcs: {} as EnvironmentApi["vcs"],
-    git: {} as EnvironmentApi["git"],
-    review: {} as EnvironmentApi["review"],
-    orchestration: {
-      dispatchCommand: input.dispatchCommand,
-      getTurnDiff: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["getTurnDiff"],
-      getFullThreadDiff: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["getFullThreadDiff"],
-      getArchivedShellSnapshot: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],
-      getAgentPlan: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["getAgentPlan"],
-      startAgentPlanOwnerPlanning: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["startAgentPlanOwnerPlanning"],
-      importAgentPlanOwnerOutput: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["importAgentPlanOwnerOutput"],
-      approveAgentPlanTasks: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["approveAgentPlanTasks"],
-      launchAgentPlanReadyWorkers: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["launchAgentPlanReadyWorkers"],
-      sendAgentPlanWorkerMessage: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["sendAgentPlanWorkerMessage"],
-      startAgentPlanReview: (() => {
-        throw new Error("Not implemented in browser test.");
-      }) as EnvironmentApi["orchestration"]["startAgentPlanReview"],
-      subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
-      subscribeThread: (() => () =>
-        undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
-      subscribeAgentPlan: (() => () =>
-        undefined) as EnvironmentApi["orchestration"]["subscribeAgentPlan"],
     },
   };
 }
@@ -5311,8 +5256,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     __setEnvironmentApiOverrideForTests(
       REMOTE_ENVIRONMENT_ID,
       createMockEnvironmentApi({
-        browse: remoteBrowseMock,
-        dispatchCommand: remoteDispatchMock,
+        filesystem: {
+          browse: remoteBrowseMock,
+        },
+        orchestration: {
+          dispatchCommand: remoteDispatchMock,
+        },
       }),
     );
 

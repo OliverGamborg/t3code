@@ -4,6 +4,7 @@ import type {
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import {
+  AgentCoordinationMessageId,
   AgentPlanId,
   AgentTaskId,
   ORCHESTRATION_WS_METHODS,
@@ -252,10 +253,13 @@ describe("createWsRpcClient", () => {
       [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage]: vi.fn(async () => ({
         sequence: 4,
       })),
+      [ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage]: vi.fn(async () => ({
+        sequence: 5,
+      })),
       [ORCHESTRATION_WS_METHODS.startAgentPlanReview]: vi.fn(async () => ({
         planId,
         reviewId: "review-coordination",
-        sequence: 5,
+        sequence: 6,
       })),
     };
     const request = vi.fn((connect: (client: typeof rpcMethods) => Promise<unknown>) =>
@@ -288,6 +292,10 @@ describe("createWsRpcClient", () => {
       title: "Progress",
       body: "Report progress.",
     });
+    await client.orchestration.retryAgentPlanCoordinationMessage({
+      planId,
+      messageId: AgentCoordinationMessageId.make("coordination-retry"),
+    });
     await client.orchestration.startAgentPlanReview({ planId });
 
     expect(rpcMethods[ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput]).toHaveBeenCalledWith({
@@ -308,6 +316,12 @@ describe("createWsRpcClient", () => {
       kind: "progress_request",
       title: "Progress",
       body: "Report progress.",
+    });
+    expect(
+      rpcMethods[ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage],
+    ).toHaveBeenCalledWith({
+      planId,
+      messageId: AgentCoordinationMessageId.make("coordination-retry"),
     });
     expect(rpcMethods[ORCHESTRATION_WS_METHODS.startAgentPlanReview]).toHaveBeenCalledWith({
       planId,

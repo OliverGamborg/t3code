@@ -34,6 +34,7 @@ import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { WorktreeManager } from "../../worktrees/Services/WorktreeManager.ts";
 import {
   buildOwnerPlanningPrompt,
+  buildOwnerWorkerReportPrompt,
   buildReviewerPrompt,
   buildWorkerMessagePrompt,
   buildWorkerExecutionPrompt,
@@ -317,6 +318,45 @@ const makeAgentPlanService = Effect.gen(function* () {
       ),
     );
 
+  const recordCleanupFailure = (input: {
+    readonly plan: AgentPlan;
+    readonly task: AgentTask;
+    readonly reason: string;
+  }) =>
+    Effect.gen(function* () {
+      const now = yield* nowIso;
+      yield* dispatchCoordinationMessage(
+        makeCoordinationMessage({
+          id: yield* coordinationMessageId(),
+          planId: input.plan.id,
+          dedupeKey: `cleanup-failed:${input.plan.id}:${input.task.id}:${now}`,
+          kind: "error",
+          status: "failed",
+          fromRole: "system",
+          toTarget: "user",
+          toTaskIds: [input.task.id],
+          title: "Worker worktree cleanup failed",
+          body: input.reason,
+          createdAt: now,
+          failedAt: now,
+          failureReason: input.reason,
+        }),
+      ).pipe(Effect.catch(() => Effect.void));
+      yield* dispatchSharedUpdate({
+        id: AgentSharedUpdateId.make(
+          `agent-update:${input.plan.id}:${input.task.id}:cleanup-failed:${slugify(now)}`,
+        ),
+        planId: input.plan.id,
+        taskId: input.task.id,
+        type: "risk",
+        title: "Worker worktree cleanup failed",
+        body: input.reason,
+        visibility: "owner_only",
+        relatedTaskIds: [input.task.id],
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+    });
+
   const queueWorkerMessage = (input: {
     readonly plan: AgentPlan;
     readonly task: AgentTask;
@@ -412,9 +452,15 @@ const makeAgentPlanService = Effect.gen(function* () {
           sharedDecisions: visibleSharedUpdates(plan),
         });
 
-        const cleanupWorktree = worktreeManager
-          .removeForAgentTask(taskWithWorker)
-          .pipe(Effect.catch(() => Effect.void));
+        const cleanupWorktree = worktreeManager.removeForAgentTask(taskWithWorker).pipe(
+          Effect.catch((error) =>
+            recordCleanupFailure({
+              plan,
+              task: taskWithWorker,
+              reason: error.message,
+            }),
+          ),
+        );
         const deleteWorkerThread = serverCommandId("agent-worker-thread-delete").pipe(
           Effect.flatMap((commandId) =>
             dispatchCommand({
@@ -523,31 +569,45 @@ const makeAgentPlanService = Effect.gen(function* () {
       };
     });
 
-  const flushQueuedCoordinationMessages: AgentPlanServiceShape["flushQueuedCoordinationMessages"] =
-    (planId) =>
-      Effect.gen(function* () {
-        const plan = yield* loadPlan(planId);
-        const results: Array<{ sequence: number }> = [];
-        for (const message of plan.coordinationMessages) {
-          if (
-            message.status !== "queued" ||
-            message.toTarget !== "worker" ||
-            message.deliveryAttempts >= 3
-          ) {
-            continue;
-          }
+  const flushQueuedMessagesForPlan = (plan: AgentPlan, targetThreadId?: ThreadId) =>
+    Effect.gen(function* () {
+      const results: Array<{ sequence: number }> = [];
+      const failMessage = (message: AgentCoordinationMessage, reason: string) =>
+        nowIso.pipe(
+          Effect.flatMap((now) =>
+            dispatchCoordinationMessage({
+              ...message,
+              status: "failed",
+              failedAt: now,
+              failureReason: reason,
+            }),
+          ),
+        );
+
+      for (const message of plan.coordinationMessages) {
+        if (message.status !== "queued") {
+          continue;
+        }
+        if (
+          targetThreadId !== undefined &&
+          !message.toThreadIds.includes(targetThreadId) &&
+          !plan.tasks.some(
+            (task) => task.workerThreadId === targetThreadId && message.toTaskIds.includes(task.id),
+          ) &&
+          !(message.toTarget === "owner" && plan.ownerThreadId === targetThreadId)
+        ) {
+          continue;
+        }
+        if (message.deliveryAttempts >= 3) {
+          results.push(
+            yield* failMessage(message, "Coordination message reached the delivery limit."),
+          );
+          continue;
+        }
+
+        if (message.toTarget === "worker") {
           const task = plan.tasks.find((candidate) => message.toTaskIds.includes(candidate.id));
           if (!task || task.workerThreadId === null) {
-            const now = yield* nowIso;
-            results.push(
-              yield* dispatchCoordinationMessage({
-                ...message,
-                status: "failed",
-                deliveryAttempts: message.deliveryAttempts + 1,
-                failedAt: now,
-                failureReason: "Target worker thread is not available.",
-              }),
-            );
             continue;
           }
           const thread = yield* projectionSnapshotQuery
@@ -568,7 +628,8 @@ const makeAgentPlanService = Effect.gen(function* () {
           const runtimeMode = "approval-required";
           const interactionMode = "default";
           const now = yield* nowIso;
-          const turnResult = yield* dispatchCommand({
+          const nextAttempts = message.deliveryAttempts + 1;
+          const delivery = yield* dispatchCommand({
             type: "thread.turn.start",
             commandId: yield* serverCommandId("agent-worker-message-turn-start"),
             threadId: task.workerThreadId,
@@ -597,18 +658,116 @@ const makeAgentPlanService = Effect.gen(function* () {
             runtimeMode,
             interactionMode,
             createdAt: now,
-          });
+          }).pipe(
+            Effect.map((result) => ({ _tag: "Success" as const, result })),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+          );
+          if (delivery._tag === "Failure") {
+            results.push(
+              yield* dispatchCoordinationMessage({
+                ...message,
+                status: nextAttempts >= 3 ? "failed" : "queued",
+                deliveryAttempts: nextAttempts,
+                failedAt: nextAttempts >= 3 ? now : null,
+                failureReason: nextAttempts >= 3 ? delivery.error.message : null,
+              }),
+            );
+            continue;
+          }
           const upsertResult = yield* dispatchCoordinationMessage({
             ...message,
             status: "sent",
             toThreadIds: [task.workerThreadId],
-            deliveryAttempts: message.deliveryAttempts + 1,
+            deliveryAttempts: nextAttempts,
             sentAt: now,
+            failedAt: null,
+            failureReason: null,
           });
-          results.push(turnResult, upsertResult);
+          results.push(delivery.result, upsertResult);
+          continue;
         }
-        return { sequence: maxSequence(results) };
-      });
+
+        if (message.toTarget === "owner") {
+          if (plan.ownerThreadId === null) {
+            continue;
+          }
+          const ownerThread = yield* projectionSnapshotQuery
+            .getThreadDetailById(plan.ownerThreadId)
+            .pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, `Failed to load owner thread ${plan.ownerThreadId}`),
+              ),
+            );
+          if (Option.isNone(ownerThread) || isThreadBusy(ownerThread.value)) {
+            continue;
+          }
+          const task = message.fromTaskId
+            ? (plan.tasks.find((candidate) => candidate.id === message.fromTaskId) ?? null)
+            : null;
+          if (task === null) {
+            results.push(
+              yield* failMessage(message, "Owner-directed message is missing a source task."),
+            );
+            continue;
+          }
+          const now = yield* nowIso;
+          const nextAttempts = message.deliveryAttempts + 1;
+          const prompt = buildOwnerWorkerReportPrompt({
+            plan,
+            task,
+            reportTitle: message.title,
+            reportBody: message.body,
+            contracts: plan.contracts,
+            relatedMessages: plan.coordinationMessages.slice(-20),
+          });
+          const delivery = yield* dispatchCommand({
+            type: "thread.turn.start",
+            commandId: yield* serverCommandId("agent-owner-queued-message-turn-start"),
+            threadId: plan.ownerThreadId,
+            message: {
+              messageId: yield* messageId(),
+              role: "user",
+              text: prompt,
+              attachments: [],
+            },
+            modelSelection: ownerThread.value.modelSelection,
+            titleSeed: message.title,
+            runtimeMode: "approval-required",
+            interactionMode: "plan",
+            createdAt: now,
+          }).pipe(
+            Effect.map((result) => ({ _tag: "Success" as const, result })),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+          );
+          if (delivery._tag === "Failure") {
+            results.push(
+              yield* dispatchCoordinationMessage({
+                ...message,
+                status: nextAttempts >= 3 ? "failed" : "queued",
+                deliveryAttempts: nextAttempts,
+                failedAt: nextAttempts >= 3 ? now : null,
+                failureReason: nextAttempts >= 3 ? delivery.error.message : null,
+              }),
+            );
+            continue;
+          }
+          const upsertResult = yield* dispatchCoordinationMessage({
+            ...message,
+            status: "sent",
+            toThreadIds: [plan.ownerThreadId],
+            deliveryAttempts: nextAttempts,
+            sentAt: now,
+            failedAt: null,
+            failureReason: null,
+          });
+          results.push(delivery.result, upsertResult);
+        }
+      }
+      return { sequence: maxSequence(results) };
+    });
+
+  const flushQueuedCoordinationMessages: AgentPlanServiceShape["flushQueuedCoordinationMessages"] =
+    (planId) => loadPlan(planId).pipe(Effect.flatMap((plan) => flushQueuedMessagesForPlan(plan)));
 
   return {
     createManualPlan: (input) =>
@@ -829,6 +988,56 @@ const makeAgentPlanService = Effect.gen(function* () {
         const taskIds = new Set(taskIdByKey.values());
         const results: Array<{ sequence: number }> = [];
 
+        for (const taskOutput of parsed.tasks) {
+          for (const dependencyKey of taskOutput.dependsOn) {
+            if (!taskIdByKey.has(dependencyKey)) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Owner output task '${taskOutput.title}' references unknown dependency '${dependencyKey}'.`,
+                cause: dependencyKey,
+              });
+            }
+          }
+          for (const relatedTaskKey of taskOutput.relatedTasks) {
+            if (!taskIdByKey.has(relatedTaskKey)) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Owner output task '${taskOutput.title}' references unknown related task '${relatedTaskKey}'.`,
+                cause: relatedTaskKey,
+              });
+            }
+          }
+          for (const contractKey of [
+            ...taskOutput.requiredContracts,
+            ...taskOutput.producedContracts,
+          ]) {
+            if (!contractIdByKey.has(contractKey)) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Owner output task '${taskOutput.title}' references unknown contract '${contractKey}'.`,
+                cause: contractKey,
+              });
+            }
+          }
+        }
+
+        for (const contractOutput of parsed.contracts) {
+          if (
+            contractOutput.producerTaskKey !== null &&
+            !taskIdByKey.has(contractOutput.producerTaskKey)
+          ) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `Owner output contract '${contractOutput.title}' references unknown producer task '${contractOutput.producerTaskKey}'.`,
+              cause: contractOutput.producerTaskKey,
+            });
+          }
+          for (const consumerTaskKey of contractOutput.consumerTaskKeys) {
+            if (!taskIdByKey.has(consumerTaskKey)) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Owner output contract '${contractOutput.title}' references unknown consumer task '${consumerTaskKey}'.`,
+                cause: consumerTaskKey,
+              });
+            }
+          }
+        }
+
         for (const existing of plan.tasks) {
           if (!taskIds.has(existing.id) && existing.workerThreadId === null) {
             results.push(
@@ -959,7 +1168,7 @@ const makeAgentPlanService = Effect.gen(function* () {
             taskId: null,
             type: "decision",
             title: "Owner task breakdown imported",
-            body: parsed.summary,
+            body: `Imported ${parsed.tasks.length} tasks and ${parsed.contracts.length} contracts.\n\n${parsed.summary}`,
             visibility: "all_workers",
             relatedTaskIds: [],
             createdAt: now,
@@ -1045,6 +1254,48 @@ const makeAgentPlanService = Effect.gen(function* () {
 
     queueCoordinationMessage: dispatchCoordinationMessage,
     flushQueuedCoordinationMessages,
+
+    retryCoordinationMessage: (input) =>
+      Effect.gen(function* () {
+        const plan = yield* loadPlan(input.planId);
+        const message = plan.coordinationMessages.find(
+          (candidate) => candidate.id === input.messageId,
+        );
+        if (!message) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: `Coordination message ${input.messageId} was not found in plan ${plan.id}.`,
+            cause: input.messageId,
+          });
+        }
+        if (message.status !== "queued" && message.status !== "failed") {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Only queued or failed coordination messages can be retried.",
+            cause: message.status,
+          });
+        }
+        if (message.toTarget !== "worker" && message.toTarget !== "owner") {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Only owner- or worker-directed coordination messages can be retried.",
+            cause: message.toTarget,
+          });
+        }
+
+        const retryMessage: AgentCoordinationMessage = {
+          ...message,
+          status: "queued",
+          sentAt: null,
+          failedAt: null,
+          failureReason: null,
+        };
+        const queued = yield* dispatchCoordinationMessage(retryMessage);
+        const flushed = yield* flushQueuedMessagesForPlan({
+          ...plan,
+          coordinationMessages: plan.coordinationMessages.map((candidate) =>
+            candidate.id === retryMessage.id ? retryMessage : candidate,
+          ),
+        });
+        return { sequence: Math.max(queued.sequence, flushed.sequence) };
+      }),
 
     startReviewer: (input) =>
       Effect.gen(function* () {

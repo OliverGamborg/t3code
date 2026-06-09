@@ -147,6 +147,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.approveAgentPlanTasks, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.startAgentPlanReview, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.subscribeAgentPlan, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
@@ -1012,6 +1013,12 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage,
             agentPlanService.sendWorkerMessage(input),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage,
+            agentPlanService.retryCoordinationMessage(input),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.startAgentPlanReview]: (input) =>

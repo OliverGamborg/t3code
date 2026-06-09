@@ -19,15 +19,17 @@ import {
   FileTextIcon,
   GitBranchIcon,
   Loader2Icon,
+  MoreVerticalIcon,
   NetworkIcon,
   PlayIcon,
   PlusIcon,
+  RotateCcwIcon,
   SendIcon,
   ShieldCheckIcon,
   SquareIcon,
   TerminalIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -195,10 +197,6 @@ export function AgentPlansPage({ planId }: AgentPlansPageProps) {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline">{plans.length} plans</Badge>
-              <Button size="sm" variant="outline">
-                <PlusIcon />
-                Add action
-              </Button>
             </div>
           </div>
         </div>
@@ -368,6 +366,8 @@ function PlanDetail({
 }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [jsonText, setJsonText] = useState("");
+  const [importMode, setImportMode] = useState<"latest" | "paste">("latest");
+  const [importError, setImportError] = useState<string | null>(null);
   const [instruction, setInstruction] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -423,10 +423,16 @@ function PlanDetail({
     runAction("import-owner", async () => {
       if (!api) throw new Error("Environment connection is not ready.");
       const trimmedJson = jsonText.trim();
+      setImportError(null);
+      if (importMode === "paste" && !trimmedJson) {
+        const message = "Paste owner JSON before importing.";
+        setImportError(message);
+        throw new Error(message);
+      }
       await api.orchestration.importAgentPlanOwnerOutput({
         planId: plan.id,
-        source: trimmedJson ? "provided_json" : "latest_owner_message",
-        ...(trimmedJson ? { jsonText: trimmedJson } : {}),
+        source: importMode === "paste" ? "provided_json" : "latest_owner_message",
+        ...(importMode === "paste" ? { jsonText: trimmedJson } : {}),
         replaceDraft: true,
       });
       setJsonText("");
@@ -483,6 +489,15 @@ function PlanDetail({
     runAction("start-review", async () => {
       if (!api) throw new Error("Environment connection is not ready.");
       await api.orchestration.startAgentPlanReview({ planId: plan.id });
+    });
+
+  const retryMessage = (message: AgentCoordinationMessage) =>
+    runAction(`retry-message:${message.id}`, async () => {
+      if (!api) throw new Error("Environment connection is not ready.");
+      await api.orchestration.retryAgentPlanCoordinationMessage({
+        planId: plan.id,
+        messageId: message.id,
+      });
     });
 
   const saveTask = async (task: AgentTask) => {
@@ -575,64 +590,73 @@ function PlanDetail({
                 No owner activity yet.
               </p>
             ) : (
-              activity.map((item) => <ActivityItem item={item} key={item.id} />)
+              activity.map((item) => (
+                <ActivityItem
+                  busy={busyAction !== null}
+                  item={item}
+                  key={item.id}
+                  onRetryMessage={retryMessage}
+                />
+              ))
             )}
           </div>
         </section>
 
-        <section className="rounded-md border border-border bg-card/45 p-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <section id="agent-plan-actions" className="rounded-md border border-border bg-card/45 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Plan actions</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Import owner output, approve workers, retry launches, and start review.
+              </p>
+            </div>
+            <PlanActionMenu
+              allTerminal={allTerminal}
+              busyAction={busyAction}
+              canStartOwner={canStartOwner}
+              hasTasks={plan.tasks.length > 0}
+              onApproveAndLaunch={approveAndLaunch}
+              onImportOwnerOutput={importOwnerOutput}
+              onLaunchReadyWorkers={launchReadyWorkers}
+              onStartOwnerPlanning={startOwnerPlanning}
+              onStartReview={startReview}
+            />
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="inline-flex rounded-md border border-border bg-background p-1 text-xs">
+              <button
+                className={`rounded px-3 py-1 ${importMode === "latest" ? "bg-accent" : ""}`}
+                onClick={() => setImportMode("latest")}
+                type="button"
+              >
+                Latest owner message
+              </button>
+              <button
+                className={`rounded px-3 py-1 ${importMode === "paste" ? "bg-accent" : ""}`}
+                onClick={() => setImportMode("paste")}
+                type="button"
+              >
+                Paste JSON
+              </button>
+            </div>
             <Textarea
               className="min-h-24"
+              disabled={importMode === "latest"}
               onChange={(event) => setJsonText(event.currentTarget.value)}
-              placeholder="Optional: paste owner JSON output here. Leave empty to import latest owner assistant message."
+              placeholder={
+                importMode === "latest"
+                  ? "Import will use the latest completed owner assistant message."
+                  : "Paste owner JSON output here."
+              }
               value={jsonText}
             />
-            <div className="flex flex-wrap items-start gap-2 lg:w-48 lg:flex-col">
-              <Button disabled={!canStartOwner || busyAction !== null} onClick={startOwnerPlanning}>
-                {busyAction === "start-owner" ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <PlayIcon />
-                )}
-                Start owner
-              </Button>
-              <Button disabled={busyAction !== null} onClick={importOwnerOutput} variant="outline">
-                {busyAction === "import-owner" ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <FileTextIcon />
-                )}
-                Import output
-              </Button>
-              <Button
-                disabled={busyAction !== null || plan.tasks.length === 0}
-                onClick={approveAndLaunch}
-              >
-                {busyAction === "approve-launch" ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <ShieldCheckIcon />
-                )}
-                Approve & launch
-              </Button>
-              <Button disabled={busyAction !== null} onClick={launchReadyWorkers} variant="outline">
-                <PlayIcon />
-                Launch ready
-              </Button>
-              <Button
-                disabled={busyAction !== null || !allTerminal}
-                onClick={startReview}
-                variant="outline"
-              >
-                <GitBranchIcon />
-                Start review
-              </Button>
-            </div>
           </div>
+          {importError ? <p className="mt-3 text-sm text-destructive">{importError}</p> : null}
           {actionError ? <p className="mt-3 text-sm text-destructive">{actionError}</p> : null}
           {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
         </section>
+
+        <ReviewPanel reviews={plan.reviews} tasks={plan.tasks} />
       </div>
 
       <WorkerInspector
@@ -641,6 +665,7 @@ function PlanDetail({
         instruction={instruction}
         onAskProgress={askProgress}
         onInstructionChange={setInstruction}
+        onRetryMessage={retryMessage}
         onSaveTask={(task) => void runAction(`save-task:${task.id}`, () => saveTask(task))}
         onSendInstruction={sendInstruction}
         plan={plan}
@@ -663,6 +688,164 @@ function MetricCell({
     <div className="min-w-20 border-r border-border px-3 py-2 last:border-r-0">
       <div className={`text-base font-semibold ${className}`}>{value}</div>
       <div className="mt-0.5 whitespace-nowrap text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+function PlanActionMenu({
+  allTerminal,
+  busyAction,
+  canStartOwner,
+  hasTasks,
+  onApproveAndLaunch,
+  onImportOwnerOutput,
+  onLaunchReadyWorkers,
+  onStartOwnerPlanning,
+  onStartReview,
+}: {
+  readonly allTerminal: boolean;
+  readonly busyAction: string | null;
+  readonly canStartOwner: boolean;
+  readonly hasTasks: boolean;
+  readonly onApproveAndLaunch: () => void;
+  readonly onImportOwnerOutput: () => void;
+  readonly onLaunchReadyWorkers: () => void;
+  readonly onStartOwnerPlanning: () => void;
+  readonly onStartReview: () => void;
+}) {
+  const busy = busyAction !== null;
+  return (
+    <details className="relative">
+      <summary className="list-none">
+        <Button size="sm" variant="outline">
+          <MoreVerticalIcon />
+          Actions
+        </Button>
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-56 rounded-md border border-border bg-popover p-1 shadow-lg">
+        <MenuButton
+          disabled={!canStartOwner || busy}
+          icon={<PlayIcon />}
+          onClick={onStartOwnerPlanning}
+        >
+          Start owner
+        </MenuButton>
+        <MenuButton disabled={busy} icon={<FileTextIcon />} onClick={onImportOwnerOutput}>
+          Import owner output
+        </MenuButton>
+        <MenuButton
+          disabled={busy || !hasTasks}
+          icon={<ShieldCheckIcon />}
+          onClick={onApproveAndLaunch}
+        >
+          Approve and launch
+        </MenuButton>
+        <MenuButton disabled={busy} icon={<RotateCcwIcon />} onClick={onLaunchReadyWorkers}>
+          Launch ready workers
+        </MenuButton>
+        <MenuButton
+          disabled={busy || !allTerminal}
+          icon={<GitBranchIcon />}
+          onClick={onStartReview}
+        >
+          Start review
+        </MenuButton>
+      </div>
+    </details>
+  );
+}
+
+function MenuButton({
+  children,
+  disabled,
+  icon,
+  onClick,
+}: {
+  readonly children: ReactNode;
+  readonly disabled: boolean;
+  readonly icon: ReactNode;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      <span className="[&_svg]:size-4">{icon}</span>
+      {children}
+    </button>
+  );
+}
+
+function ReviewPanel({
+  reviews,
+  tasks,
+}: {
+  readonly reviews: ReadonlyArray<AgentReview>;
+  readonly tasks: ReadonlyArray<AgentTask>;
+}) {
+  const review =
+    reviews.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+  const taskTitle = (taskId: AgentTask["id"]) =>
+    tasks.find((task) => task.id === taskId)?.title ?? String(taskId);
+
+  return (
+    <section className="rounded-md border border-border bg-card/45 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">Review</h2>
+        <Badge
+          variant={
+            review
+              ? review.status === "failed"
+                ? "error"
+                : review.status === "passed"
+                  ? "success"
+                  : "warning"
+              : "outline"
+          }
+        >
+          {review?.status ?? "not started"}
+        </Badge>
+      </div>
+      {!review ? (
+        <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+          Review has not started.
+        </p>
+      ) : (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <ReviewList title="Merge order" values={review.mergeOrder.map(taskTitle)} />
+          <ReviewList title="Required fixes" values={review.requiredFixes} />
+          <ReviewList title="Risks" values={review.risks} />
+          <ReviewList title="Tests" values={review.testRecommendations} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ReviewList({
+  title,
+  values,
+}: {
+  readonly title: string;
+  readonly values: ReadonlyArray<string>;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-background/50 p-3">
+      <h3 className="text-xs font-semibold text-muted-foreground">{title}</h3>
+      {values.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">None</p>
+      ) : (
+        <ul className="mt-2 space-y-1 text-sm">
+          {values.map((value) => (
+            <li className="truncate" key={value}>
+              {value}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -700,13 +883,15 @@ function WorkerCard({
       <p className="mt-4 line-clamp-3 text-sm text-muted-foreground">{task.description}</p>
       <div className="mt-6">
         <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-          <span>{taskProgress(task)} / 10</span>
+          <span>
+            {taskProgress(task).done} / {taskProgress(task).total}
+          </span>
           {task.branchName ? <span className="truncate">{task.branchName}</span> : null}
         </div>
         <div className="h-1.5 rounded-full bg-muted">
           <div
             className={`h-full rounded-full ${tone.bar}`}
-            style={{ width: `${taskProgress(task) * 10}%` }}
+            style={{ width: `${taskProgress(task).percent}%` }}
           />
         </div>
       </div>
@@ -720,6 +905,7 @@ function WorkerInspector({
   instruction,
   onAskProgress,
   onInstructionChange,
+  onRetryMessage,
   onSaveTask,
   onSendInstruction,
   plan,
@@ -730,6 +916,7 @@ function WorkerInspector({
   readonly instruction: string;
   readonly onAskProgress: (task: AgentTask) => void;
   readonly onInstructionChange: (value: string) => void;
+  readonly onRetryMessage: (message: AgentCoordinationMessage) => void;
   readonly onSaveTask: (task: AgentTask) => void;
   readonly onSendInstruction: (task: AgentTask) => void;
   readonly plan: AgentPlanDetailSnapshot["plan"];
@@ -787,6 +974,38 @@ function WorkerInspector({
             <InspectorRow label="Branch" value={selectedTask.branchName ?? "Not created"} />
             <InspectorRow label="Worktree" value={selectedTask.worktreePath ?? "Not created"} />
           </dl>
+          <div className="mt-4 space-y-3">
+            <ChipList
+              emptyLabel="No dependencies"
+              items={selectedTask.dependsOn.map(
+                (taskId) => plan.tasks.find((task) => task.id === taskId)?.title ?? String(taskId),
+              )}
+              label="Dependencies"
+            />
+            <ChipList
+              emptyLabel="No required contracts"
+              items={selectedTask.requiredContracts.map(
+                (contractId) =>
+                  plan.contracts.find((contract) => contract.id === contractId)?.title ??
+                  String(contractId),
+              )}
+              label="Requires"
+            />
+            <ChipList
+              emptyLabel="No produced contracts"
+              items={selectedTask.producedContracts.map(
+                (contractId) =>
+                  plan.contracts.find((contract) => contract.id === contractId)?.title ??
+                  String(contractId),
+              )}
+              label="Produces"
+            />
+          </div>
+          {launchBlockerReason(plan, selectedTask) ? (
+            <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              {launchBlockerReason(plan, selectedTask)}
+            </p>
+          ) : null}
           {selectedTask.workerThreadId && environmentId ? (
             <Button
               className="mt-3"
@@ -808,12 +1027,14 @@ function WorkerInspector({
         <div>
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Progress</span>
-            <span>{taskProgress(selectedTask)} / 10 completed</span>
+            <span>
+              {taskProgress(selectedTask).done} / {taskProgress(selectedTask).total} completed
+            </span>
           </div>
           <div className="h-1.5 rounded-full bg-muted">
             <div
               className={`h-full rounded-full ${taskTone(selectedTask.status).bar}`}
-              style={{ width: `${taskProgress(selectedTask) * 10}%` }}
+              style={{ width: `${taskProgress(selectedTask).percent}%` }}
             />
           </div>
           <div className="mt-3 space-y-1.5">
@@ -915,9 +1136,22 @@ function WorkerInspector({
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-xs font-medium">{message.title}</p>
-                  <Badge size="sm" variant={message.status === "failed" ? "error" : "outline"}>
-                    {message.status}
-                  </Badge>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Badge size="sm" variant={message.status === "failed" ? "error" : "outline"}>
+                      {message.status}
+                    </Badge>
+                    {canRetryMessage(message) ? (
+                      <Button
+                        disabled={busyAction !== null}
+                        onClick={() => onRetryMessage(message)}
+                        size="icon-xs"
+                        title="Retry message"
+                        variant="ghost"
+                      >
+                        <RotateCcwIcon />
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{message.body}</p>
               </div>
@@ -935,6 +1169,55 @@ function InspectorRow({ label, value }: { readonly label: string; readonly value
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="truncate">{value}</dd>
     </div>
+  );
+}
+
+function ChipList({
+  emptyLabel,
+  items,
+  label,
+}: {
+  readonly emptyLabel: string;
+  readonly items: ReadonlyArray<string>;
+  readonly label: string;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.length === 0 ? (
+          <span className="text-xs text-muted-foreground">{emptyLabel}</span>
+        ) : (
+          items.map((item) => (
+            <Badge key={item} size="sm" variant="outline">
+              {item}
+            </Badge>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function launchBlockerReason(
+  plan: AgentPlanDetailSnapshot["plan"],
+  task: AgentTask,
+): string | null {
+  if (task.status !== "pending") return "Only pending tasks can be launched.";
+  if (task.workerThreadId !== null) return "Worker thread already exists.";
+  const unmet = task.dependsOn.filter(
+    (taskId) => plan.tasks.find((candidate) => candidate.id === taskId)?.status !== "done",
+  );
+  if (unmet.length > 0) {
+    return `Waiting on ${unmet.length} dependencies.`;
+  }
+  return null;
+}
+
+function canRetryMessage(message: AgentCoordinationMessage): boolean {
+  return (
+    (message.status === "queued" || message.status === "failed") &&
+    (message.toTarget === "worker" || message.toTarget === "owner")
   );
 }
 
@@ -972,26 +1255,35 @@ function countTasks(tasks: ReadonlyArray<AgentTask>) {
   };
 }
 
-function taskProgress(task: AgentTask): number {
-  if (task.status === "done") return 10;
-  if (task.status === "failed" || task.status === "cancelled") return 10;
-  if (task.status === "running") return 6;
-  if (task.status === "blocked") return 2;
-  return task.workerThreadId ? 1 : 0;
+function taskProgress(task: AgentTask): {
+  readonly done: number;
+  readonly total: number;
+  readonly percent: number;
+} {
+  const items = workerProgressItems(task);
+  const done = items.filter((item) => item.done).length;
+  return {
+    done,
+    total: items.length,
+    percent: Math.round((done / items.length) * 100),
+  };
 }
 
 function workerProgressItems(task: AgentTask) {
   return [
-    { label: "Create worktree", done: task.worktreePath !== null },
-    { label: "Start worker thread", done: task.workerThreadId !== null },
+    { label: "Task imported", done: true },
     {
-      label: "Run implementation",
-      done: ["running", "blocked", "done", "failed"].includes(task.status),
+      label: "Approved",
+      done: task.status !== "pending" || task.workerThreadId !== null,
     },
-    { label: "Report progress", done: task.summary !== null },
-    { label: "Resolve blockers", done: task.status !== "blocked" },
-    { label: "Complete task", done: task.status === "done" },
-    { label: "Final review input", done: task.status === "done" || task.status === "failed" },
+    { label: "Worktree created", done: task.worktreePath !== null },
+    { label: "Worker thread started", done: task.workerThreadId !== null },
+    {
+      label: "First report received",
+      done: task.summary !== null || ["blocked", "done", "failed"].includes(task.status),
+    },
+    { label: "Tests reported", done: task.status === "done" || task.status === "failed" },
+    { label: "Done/failed", done: task.status === "done" || task.status === "failed" },
   ];
 }
 
@@ -1034,6 +1326,7 @@ type ActivityItemModel = {
   readonly at: string;
   readonly type: string;
   readonly status?: string;
+  readonly message?: AgentCoordinationMessage;
 };
 
 function makeActivity(
@@ -1056,6 +1349,7 @@ function makeActivity(
       at: message.createdAt,
       type: message.kind,
       status: message.status,
+      message,
     })),
     ...reviews.map((review) => ({
       id: review.id,
@@ -1068,7 +1362,15 @@ function makeActivity(
   ].toSorted((left, right) => right.at.localeCompare(left.at));
 }
 
-function ActivityItem({ item }: { readonly item: ActivityItemModel }) {
+function ActivityItem({
+  busy,
+  item,
+  onRetryMessage,
+}: {
+  readonly busy: boolean;
+  readonly item: ActivityItemModel;
+  readonly onRetryMessage: (message: AgentCoordinationMessage) => void;
+}) {
   const failed = item.status === "failed" || item.type === "blocker" || item.type === "error";
   const complete = item.status === "acknowledged" || item.type === "completion";
   return (
@@ -1095,9 +1397,22 @@ function ActivityItem({ item }: { readonly item: ActivityItemModel }) {
       <div className="rounded-md border border-border bg-background/60 px-3 py-2">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <p className="truncate text-sm font-medium">{item.title}</p>
-          <Badge size="sm" variant={failed ? "error" : "outline"}>
-            {item.status ?? item.type}
-          </Badge>
+          <div className="flex shrink-0 items-center gap-1">
+            <Badge size="sm" variant={failed ? "error" : "outline"}>
+              {item.status ?? item.type}
+            </Badge>
+            {item.message && canRetryMessage(item.message) ? (
+              <Button
+                disabled={busy}
+                onClick={() => onRetryMessage(item.message!)}
+                size="icon-xs"
+                title="Retry message"
+                variant="ghost"
+              >
+                <RotateCcwIcon />
+              </Button>
+            ) : null}
+          </div>
         </div>
         <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{item.body}</p>
         <p className="mt-2 text-xs text-muted-foreground">{formatTime(item.at)}</p>

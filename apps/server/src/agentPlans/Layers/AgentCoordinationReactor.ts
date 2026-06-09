@@ -260,9 +260,20 @@ const make = Effect.gen(function* () {
     projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
       Effect.map((detail) => {
         if (Option.isNone(detail)) return true;
+        const session = detail.value.session;
+        if (session) {
+          return session.status === "running" || session.activeTurnId !== null;
+        }
         return detail.value.latestTurn?.state === "running";
       }),
     );
+
+  const isThreadSessionIdle = (
+    event: Extract<OrchestrationEvent, { type: "thread.session-set" }>,
+  ) =>
+    event.payload.session.activeTurnId === null &&
+    event.payload.session.status !== "running" &&
+    event.payload.session.status !== "starting";
 
   const dispatchWorkerTurn = (input: {
     readonly plan: AgentPlan;
@@ -355,6 +366,164 @@ const make = Effect.gen(function* () {
         interactionMode: "default",
         createdAt: input.now,
       });
+    });
+
+  const flushQueuedMessages = (plan: AgentPlan, targetThreadId: ThreadId) =>
+    Effect.gen(function* () {
+      for (const message of plan.coordinationMessages) {
+        if (message.status !== "queued") continue;
+        if (message.deliveryAttempts >= 3) {
+          yield* upsertCoordination({
+            ...message,
+            status: "failed",
+            failedAt: yield* nowIso,
+            failureReason: "Coordination message reached the delivery limit.",
+          });
+          continue;
+        }
+
+        if (message.toTarget === "worker") {
+          const task = plan.tasks.find(
+            (candidate) =>
+              candidate.workerThreadId === targetThreadId &&
+              message.toTaskIds.includes(candidate.id),
+          );
+          if (!task || task.workerThreadId === null) continue;
+          if (yield* isThreadBusy(task.workerThreadId)) continue;
+
+          const now = yield* nowIso;
+          const nextAttempts = message.deliveryAttempts + 1;
+          const delivery = yield* dispatch({
+            type: "thread.turn.start",
+            commandId: yield* commandId("agent-worker-queued-turn"),
+            threadId: task.workerThreadId,
+            message: {
+              messageId: yield* randomUuid.pipe(Effect.map(MessageId.make)),
+              role: "user",
+              text: buildWorkerMessagePrompt({
+                plan,
+                task,
+                kind:
+                  message.kind === "progress_request" ||
+                  message.kind === "assignment" ||
+                  message.kind === "clarification_response" ||
+                  message.kind === "sync"
+                    ? message.kind
+                    : "sync",
+                title: message.title,
+                body: message.body,
+                contracts: plan.contracts.filter(
+                  (contract) =>
+                    task.requiredContracts.includes(contract.id) ||
+                    task.producedContracts.includes(contract.id) ||
+                    contract.consumerTaskIds.includes(task.id) ||
+                    contract.producerTaskId === task.id,
+                ),
+                sharedUpdates: plan.sharedUpdates.slice(-20),
+              }),
+              attachments: [],
+            },
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: DEFAULT_MODEL,
+            },
+            titleSeed: message.title,
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            createdAt: now,
+          }).pipe(
+            Effect.map((result) => ({ _tag: "Success" as const, result })),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+          );
+          if (delivery._tag === "Failure") {
+            yield* upsertCoordination({
+              ...message,
+              status: nextAttempts >= 3 ? "failed" : "queued",
+              deliveryAttempts: nextAttempts,
+              failedAt: nextAttempts >= 3 ? now : null,
+              failureReason: nextAttempts >= 3 ? delivery.error.message : null,
+            });
+            continue;
+          }
+          yield* upsertCoordination({
+            ...message,
+            status: "sent",
+            toThreadIds: [task.workerThreadId],
+            deliveryAttempts: nextAttempts,
+            sentAt: now,
+            failedAt: null,
+            failureReason: null,
+          });
+          continue;
+        }
+
+        if (message.toTarget === "owner" && plan.ownerThreadId === targetThreadId) {
+          const ownerThread = yield* projectionSnapshotQuery.getThreadDetailById(
+            plan.ownerThreadId,
+          );
+          if (Option.isNone(ownerThread) || (yield* isThreadBusy(plan.ownerThreadId))) continue;
+          const task = message.fromTaskId
+            ? (plan.tasks.find((candidate) => candidate.id === message.fromTaskId) ?? null)
+            : null;
+          if (task === null) {
+            yield* upsertCoordination({
+              ...message,
+              status: "failed",
+              failedAt: yield* nowIso,
+              failureReason: "Owner-directed message is missing a source task.",
+            });
+            continue;
+          }
+
+          const now = yield* nowIso;
+          const nextAttempts = message.deliveryAttempts + 1;
+          const delivery = yield* dispatch({
+            type: "thread.turn.start",
+            commandId: yield* commandId("agent-owner-queued-turn"),
+            threadId: plan.ownerThreadId,
+            message: {
+              messageId: yield* randomUuid.pipe(Effect.map(MessageId.make)),
+              role: "user",
+              text: buildOwnerWorkerReportPrompt({
+                plan,
+                task,
+                reportTitle: message.title,
+                reportBody: message.body,
+                contracts: plan.contracts,
+                relatedMessages: plan.coordinationMessages.slice(-20),
+              }),
+              attachments: [],
+            },
+            modelSelection: ownerThread.value.modelSelection,
+            titleSeed: message.title,
+            runtimeMode: "approval-required",
+            interactionMode: "plan",
+            createdAt: now,
+          }).pipe(
+            Effect.map((result) => ({ _tag: "Success" as const, result })),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+          );
+          if (delivery._tag === "Failure") {
+            yield* upsertCoordination({
+              ...message,
+              status: nextAttempts >= 3 ? "failed" : "queued",
+              deliveryAttempts: nextAttempts,
+              failedAt: nextAttempts >= 3 ? now : null,
+              failureReason: nextAttempts >= 3 ? delivery.error.message : null,
+            });
+            continue;
+          }
+          yield* upsertCoordination({
+            ...message,
+            status: "sent",
+            toThreadIds: [plan.ownerThreadId],
+            deliveryAttempts: nextAttempts,
+            sentAt: now,
+            failedAt: null,
+            failureReason: null,
+          });
+        }
+      }
     });
 
   const launchReadyWorkers = (plan: AgentPlan) =>
@@ -573,6 +742,30 @@ const make = Effect.gen(function* () {
         contracts: input.plan.contracts,
         relatedMessages: input.plan.coordinationMessages.slice(-20),
       });
+      const ownerBusy = yield* isThreadBusy(input.plan.ownerThreadId);
+      if (ownerBusy) {
+        yield* upsertCoordination(
+          makeMessage({
+            id: yield* coordinationMessageId(),
+            planId: input.plan.id,
+            dedupeKey: `owner-notify:${input.plan.id}:${input.sourceMessageId}`,
+            kind: "sync",
+            status: "queued",
+            fromRole: "system",
+            fromTaskId: input.task.id,
+            fromThreadId: input.task.workerThreadId,
+            toTarget: "owner",
+            toThreadIds: [input.plan.ownerThreadId],
+            sourceMessageId: input.sourceMessageId,
+            correlationId: input.correlationId,
+            title: input.title,
+            body: input.body,
+            createdAt: input.now,
+            requiresResponse: true,
+          }),
+        );
+        return;
+      }
       yield* dispatch({
         type: "thread.turn.start",
         commandId: yield* commandId("agent-owner-worker-report-turn"),
@@ -645,32 +838,44 @@ const make = Effect.gen(function* () {
     if (plan.coordinationMessages.some((message) => message.dedupeKey === dedupeKey)) {
       return;
     }
-    const report = yield* parseWorkerReport(text).pipe(
-      Effect.tapError((error) =>
-        upsertCoordination(
-          makeMessage({
-            id: AgentCoordinationMessageId.make(
-              `agent-coordination-error:${event.payload.messageId}`,
-            ),
-            planId: plan.id,
-            dedupeKey,
-            kind: "error",
-            status: "failed",
-            fromRole: "worker",
-            fromTaskId: task.id,
-            fromThreadId: task.workerThreadId,
-            toTarget: "owner",
-            sourceMessageId: event.payload.messageId,
-            sourceTurnId: event.payload.turnId,
-            title: "Worker report parse failed",
-            body: error.message,
-            createdAt: now,
-            failedAt: now,
-            failureReason: error.message,
-          }),
-        ),
-      ),
+    const parsedReport = yield* parseWorkerReport(text).pipe(
+      Effect.map((report) => ({ _tag: "Success" as const, report })),
+      Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
     );
+    if (parsedReport._tag === "Failure") {
+      yield* upsertCoordination(
+        makeMessage({
+          id: AgentCoordinationMessageId.make(
+            `agent-coordination-error:${event.payload.messageId}`,
+          ),
+          planId: plan.id,
+          dedupeKey,
+          kind: "error",
+          status: "failed",
+          fromRole: "worker",
+          fromTaskId: task.id,
+          fromThreadId: task.workerThreadId,
+          toTarget: "owner",
+          sourceMessageId: event.payload.messageId,
+          sourceTurnId: event.payload.turnId,
+          title: "Worker report parse failed",
+          body: parsedReport.error.message,
+          createdAt: now,
+          failedAt: now,
+          failureReason: parsedReport.error.message,
+        }),
+      );
+      yield* appendSharedUpdate({
+        plan,
+        task,
+        type: "risk",
+        title: "Worker report parse failed",
+        body: parsedReport.error.message,
+        now,
+      });
+      return;
+    }
+    const report = parsedReport.report;
     const nextStatus =
       report.status === "progress"
         ? task.status
@@ -696,13 +901,14 @@ const make = Effect.gen(function* () {
         .join("\n\n"),
       now,
     });
-    yield* upsertTask(plan, {
+    const nextTask = {
       ...task,
       status: nextStatus,
       summary: report.summary,
       riskNotes: report.blockers.length > 0 ? report.blockers.join("\n") : task.riskNotes,
       updatedAt: now,
-    });
+    };
+    yield* upsertTask(plan, nextTask);
     for (const update of report.changedContracts) {
       yield* upsertContract(plan, contractFromUpdate({ plan, task, update, now }));
     }
@@ -754,7 +960,10 @@ const make = Effect.gen(function* () {
       });
     }
     if (report.status === "done") {
-      yield* launchReadyWorkers(plan).pipe(Effect.catch(() => Effect.void));
+      yield* launchReadyWorkers({
+        ...plan,
+        tasks: plan.tasks.map((candidate) => (candidate.id === nextTask.id ? nextTask : candidate)),
+      }).pipe(Effect.catch(() => Effect.void));
     }
   });
 
@@ -765,7 +974,47 @@ const make = Effect.gen(function* () {
   ) {
     if (!text.includes("t3-agent-owner-routing")) return;
     const now = yield* nowIso;
-    const output = yield* parseOwnerRoutingOutput(text);
+    const parseDedupeKey = `owner-routing:${plan.id}:${event.payload.messageId}`;
+    if (plan.coordinationMessages.some((message) => message.dedupeKey === parseDedupeKey)) {
+      return;
+    }
+    const parsedOutput = yield* parseOwnerRoutingOutput(text).pipe(
+      Effect.map((output) => ({ _tag: "Success" as const, output })),
+      Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+    );
+    if (parsedOutput._tag === "Failure") {
+      yield* upsertCoordination(
+        makeMessage({
+          id: AgentCoordinationMessageId.make(
+            `agent-coordination-error:${event.payload.messageId}`,
+          ),
+          planId: plan.id,
+          dedupeKey: parseDedupeKey,
+          kind: "error",
+          status: "failed",
+          fromRole: "owner",
+          fromThreadId: plan.ownerThreadId,
+          toTarget: "user",
+          sourceMessageId: event.payload.messageId,
+          sourceTurnId: event.payload.turnId,
+          title: "Owner routing parse failed",
+          body: parsedOutput.error.message,
+          createdAt: now,
+          failedAt: now,
+          failureReason: parsedOutput.error.message,
+        }),
+      );
+      yield* appendSharedUpdate({
+        plan,
+        task: null,
+        type: "risk",
+        title: "Owner routing parse failed",
+        body: parsedOutput.error.message,
+        now,
+      });
+      return;
+    }
+    const output = parsedOutput.output;
     for (const taskUpdate of output.taskUpdates) {
       const taskId =
         taskUpdate.taskId ??
@@ -838,7 +1087,47 @@ const make = Effect.gen(function* () {
   ) {
     if (!text.includes("t3-agent-review")) return;
     const now = yield* nowIso;
-    const output = yield* parseReviewerOutput(text);
+    const parseDedupeKey = `reviewer-output:${plan.id}:${event.payload.messageId}`;
+    if (plan.coordinationMessages.some((message) => message.dedupeKey === parseDedupeKey)) {
+      return;
+    }
+    const parsedOutput = yield* parseReviewerOutput(text).pipe(
+      Effect.map((output) => ({ _tag: "Success" as const, output })),
+      Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
+    );
+    if (parsedOutput._tag === "Failure") {
+      yield* upsertCoordination(
+        makeMessage({
+          id: AgentCoordinationMessageId.make(
+            `agent-coordination-error:${event.payload.messageId}`,
+          ),
+          planId: plan.id,
+          dedupeKey: parseDedupeKey,
+          kind: "error",
+          status: "failed",
+          fromRole: "reviewer",
+          fromThreadId: event.payload.threadId,
+          toTarget: "user",
+          sourceMessageId: event.payload.messageId,
+          sourceTurnId: event.payload.turnId,
+          title: "Reviewer output parse failed",
+          body: parsedOutput.error.message,
+          createdAt: now,
+          failedAt: now,
+          failureReason: parsedOutput.error.message,
+        }),
+      );
+      yield* appendSharedUpdate({
+        plan,
+        task: null,
+        type: "risk",
+        title: "Reviewer output parse failed",
+        body: parsedOutput.error.message,
+        now,
+      });
+      return;
+    }
+    const output = parsedOutput.output;
     yield* dispatch({
       type: "agent-review.upsert",
       commandId: yield* commandId("agent-review-complete"),
@@ -868,6 +1157,14 @@ const make = Effect.gen(function* () {
   const processEvent = Effect.fn("processAgentCoordinationEvent")(function* (
     event: OrchestrationEvent,
   ) {
+    if (event.type === "thread.session-set" && isThreadSessionIdle(event)) {
+      const role = yield* findPlanRole(String(event.payload.threadId));
+      if (role) {
+        yield* flushQueuedMessages(role.plan, event.payload.threadId);
+      }
+      return;
+    }
+
     if (
       event.type !== "thread.message-sent" ||
       event.payload.role !== "assistant" ||

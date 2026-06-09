@@ -181,6 +181,9 @@ export interface WsRpcClient {
     readonly sendAgentPlanWorkerMessage: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage
     >;
+    readonly retryAgentPlanCoordinationMessage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage
+    >;
     readonly startAgentPlanReview: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.startAgentPlanReview
     >;
@@ -402,6 +405,10 @@ export function createWsRpcClient(
       sendAgentPlanWorkerMessage: (input) =>
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage](input),
+        ),
+      retryAgentPlanCoordinationMessage: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage](input),
         ),
       startAgentPlanReview: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.startAgentPlanReview](input)),

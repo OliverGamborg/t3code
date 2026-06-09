@@ -5,6 +5,7 @@ import type {
   AgentReview,
   AgentReviewId,
   AgentSharedUpdate,
+  AgentCoordinationMessageId,
   AgentTask,
   AgentTaskId,
   CommandId,
@@ -108,6 +109,11 @@ export interface StartAgentPlanReviewResult {
   readonly sequence: number;
 }
 
+export interface RetryCoordinationMessageInput {
+  readonly planId: AgentPlanId;
+  readonly messageId: AgentCoordinationMessageId;
+}
+
 export interface AgentPlanServiceShape {
   readonly createManualPlan: (
     input: CreateManualAgentPlanInput,
@@ -132,6 +138,9 @@ export interface AgentPlanServiceShape {
   ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError>;
   readonly flushQueuedCoordinationMessages: (
     planId: AgentPlanId,
+  ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError>;
+  readonly retryCoordinationMessage: (
+    input: RetryCoordinationMessageInput,
   ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError>;
   readonly startReviewer: (
     input: StartAgentPlanReviewInput,

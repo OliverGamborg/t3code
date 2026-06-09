@@ -14,6 +14,7 @@ import {
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
+  OrchestrationRetryAgentPlanCoordinationMessageInput,
   OrchestrationSession,
   OrchestrationStartAgentPlanOwnerPlanningInput,
   ProjectCreateCommand,
@@ -56,6 +57,9 @@ const decodeAgentPlanShell = Schema.decodeUnknownEffect(AgentPlanShell);
 const decodeAgentTask = Schema.decodeUnknownEffect(AgentTask);
 const decodeStartAgentPlanOwnerPlanningInput = Schema.decodeUnknownEffect(
   OrchestrationStartAgentPlanOwnerPlanningInput,
+);
+const decodeRetryAgentPlanCoordinationMessageInput = Schema.decodeUnknownEffect(
+  OrchestrationRetryAgentPlanCoordinationMessageInput,
 );
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
@@ -155,6 +159,18 @@ it.effect("decodes owner planning start input with provider overrides", () =>
     assert.strictEqual(parsed.modelSelection?.instanceId, ProviderInstanceId.make("codex"));
     assert.strictEqual(parsed.runtimeMode, "approval-required");
     assert.strictEqual(parsed.interactionMode, "plan");
+  }),
+);
+
+it.effect("decodes coordination message retry input", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeRetryAgentPlanCoordinationMessageInput({
+      planId: "plan-1",
+      messageId: "message-1",
+    });
+
+    assert.strictEqual(parsed.planId, "plan-1");
+    assert.strictEqual(parsed.messageId, "message-1");
   }),
 );
 

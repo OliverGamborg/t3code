@@ -1,9 +1,12 @@
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import { ServerConfig } from "../../config.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { WorktreeManager, type WorktreeManagerShape } from "../Services/WorktreeManager.ts";
@@ -37,9 +40,27 @@ function shortId(value: string): string {
   );
 }
 
+function taskBranchSegment(title: string, id: string): string {
+  const suffix = `-${shortId(id)}`;
+  const maxBaseLength = Math.max(1, 48 - suffix.length);
+  const base = slugify(title).slice(0, maxBaseLength).replace(/-+$/g, "") || "task";
+  return `${base}${suffix}`;
+}
+
 const make = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflowService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const config = yield* ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  const canonicalizePath = (value: string) =>
+    fileSystem.realPath(path.resolve(value)).pipe(Effect.orElseSucceed(() => path.resolve(value)));
+
+  const isWithinRoot = (candidate: string, root: string) => {
+    const relative = path.relative(root, candidate);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  };
 
   const createForAgentTask: WorktreeManagerShape["createForAgentTask"] = (task) =>
     Effect.gen(function* () {
@@ -87,7 +108,7 @@ const make = Effect.gen(function* () {
       const branchName = [
         "agent",
         slugify(String(task.planId)),
-        `${slugify(task.title)}-${shortId(String(task.id))}`,
+        taskBranchSegment(task.title, String(task.id)),
       ].join("/");
       const created = yield* gitWorkflow
         .createWorktree({
@@ -113,7 +134,10 @@ const make = Effect.gen(function* () {
   const removeForAgentTask: WorktreeManagerShape["removeForAgentTask"] = (task) =>
     Effect.gen(function* () {
       if (task.worktreePath === null) {
-        return;
+        return yield* new OrchestrationDispatchCommandError({
+          message: `Task ${task.id} has no worker worktree to remove.`,
+          cause: task.id,
+        });
       }
       const project = yield* projectionSnapshotQuery
         .getProjectShellById(task.projectId)
@@ -123,7 +147,20 @@ const make = Effect.gen(function* () {
           ),
         );
       if (Option.isNone(project)) {
-        return;
+        return yield* new OrchestrationDispatchCommandError({
+          message: `Project ${task.projectId} for task ${task.id} was not found.`,
+          cause: task.projectId,
+        });
+      }
+      const [candidatePath, worktreesRoot] = yield* Effect.all([
+        canonicalizePath(task.worktreePath),
+        canonicalizePath(config.worktreesDir),
+      ]);
+      if (!isWithinRoot(candidatePath, worktreesRoot)) {
+        return yield* new OrchestrationDispatchCommandError({
+          message: `Refusing to remove worktree outside configured worktree root: ${task.worktreePath}.`,
+          cause: { worktreePath: task.worktreePath, worktreesRoot: config.worktreesDir },
+        });
       }
       yield* gitWorkflow
         .removeWorktree({

@@ -8,6 +8,7 @@ import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import {
   AgentPlanId,
+  AgentCoordinationMessageId,
   AgentReviewId,
   AgentTaskId,
   ApprovalRequestId,
@@ -50,6 +51,7 @@ export const ORCHESTRATION_WS_METHODS = {
   approveAgentPlanTasks: "orchestration.approveAgentPlanTasks",
   launchAgentPlanReadyWorkers: "orchestration.launchAgentPlanReadyWorkers",
   sendAgentPlanWorkerMessage: "orchestration.sendAgentPlanWorkerMessage",
+  retryAgentPlanCoordinationMessage: "orchestration.retryAgentPlanCoordinationMessage",
   startAgentPlanReview: "orchestration.startAgentPlanReview",
   subscribeAgentPlan: "orchestration.subscribeAgentPlan",
 } as const;
@@ -1524,6 +1526,13 @@ export const OrchestrationSendAgentPlanWorkerMessageInput = Schema.Struct({
 export type OrchestrationSendAgentPlanWorkerMessageInput =
   typeof OrchestrationSendAgentPlanWorkerMessageInput.Type;
 
+export const OrchestrationRetryAgentPlanCoordinationMessageInput = Schema.Struct({
+  planId: AgentPlanId,
+  messageId: AgentCoordinationMessageId,
+});
+export type OrchestrationRetryAgentPlanCoordinationMessageInput =
+  typeof OrchestrationRetryAgentPlanCoordinationMessageInput.Type;
+
 export const OrchestrationStartAgentPlanReviewInput = Schema.Struct({
   planId: AgentPlanId,
   modelSelection: Schema.optional(ModelSelection),
@@ -1585,6 +1594,10 @@ export const OrchestrationRpcSchemas = {
   },
   sendAgentPlanWorkerMessage: {
     input: OrchestrationSendAgentPlanWorkerMessageInput,
+    output: DispatchResult,
+  },
+  retryAgentPlanCoordinationMessage: {
+    input: OrchestrationRetryAgentPlanCoordinationMessageInput,
     output: DispatchResult,
   },
   startAgentPlanReview: {

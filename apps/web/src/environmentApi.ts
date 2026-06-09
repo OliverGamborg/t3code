@@ -59,6 +59,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       approveAgentPlanTasks: rpcClient.orchestration.approveAgentPlanTasks,
       launchAgentPlanReadyWorkers: rpcClient.orchestration.launchAgentPlanReadyWorkers,
       sendAgentPlanWorkerMessage: rpcClient.orchestration.sendAgentPlanWorkerMessage,
+      retryAgentPlanCoordinationMessage: rpcClient.orchestration.retryAgentPlanCoordinationMessage,
       startAgentPlanReview: rpcClient.orchestration.startAgentPlanReview,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),

@@ -186,6 +186,12 @@ function createClient() {
       getArchivedShellSnapshot: vi.fn(async () => undefined),
       getAgentPlan: vi.fn(async () => undefined),
       startAgentPlanOwnerPlanning: vi.fn(async () => undefined),
+      importAgentPlanOwnerOutput: vi.fn(async () => undefined),
+      approveAgentPlanTasks: vi.fn(async () => undefined),
+      launchAgentPlanReadyWorkers: vi.fn(async () => undefined),
+      sendAgentPlanWorkerMessage: vi.fn(async () => undefined),
+      retryAgentPlanCoordinationMessage: vi.fn(async () => undefined),
+      startAgentPlanReview: vi.fn(async () => undefined),
       subscribeAgentPlan: vi.fn(() => () => undefined),
     },
     terminal: {

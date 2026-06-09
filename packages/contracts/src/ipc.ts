@@ -65,6 +65,7 @@ import type {
   OrchestrationImportAgentPlanOwnerOutputResult,
   OrchestrationLaunchAgentPlanReadyWorkersInput,
   OrchestrationLaunchAgentPlanReadyWorkersResult,
+  OrchestrationRetryAgentPlanCoordinationMessageInput,
   OrchestrationSendAgentPlanWorkerMessageInput,
   OrchestrationStartAgentPlanReviewInput,
   OrchestrationStartAgentPlanReviewResult,
@@ -636,6 +637,9 @@ export interface EnvironmentApi {
     ) => Promise<OrchestrationLaunchAgentPlanReadyWorkersResult>;
     sendAgentPlanWorkerMessage: (
       input: OrchestrationSendAgentPlanWorkerMessageInput,
+    ) => Promise<{ sequence: number }>;
+    retryAgentPlanCoordinationMessage: (
+      input: OrchestrationRetryAgentPlanCoordinationMessageInput,
     ) => Promise<{ sequence: number }>;
     startAgentPlanReview: (
       input: OrchestrationStartAgentPlanReviewInput,

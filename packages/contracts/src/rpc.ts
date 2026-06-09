@@ -60,6 +60,7 @@ import {
   OrchestrationApproveAgentPlanTasksInput,
   OrchestrationImportAgentPlanOwnerOutputInput,
   OrchestrationLaunchAgentPlanReadyWorkersInput,
+  OrchestrationRetryAgentPlanCoordinationMessageInput,
   OrchestrationSendAgentPlanWorkerMessageInput,
   OrchestrationStartAgentPlanReviewInput,
   OrchestrationStartAgentPlanOwnerPlanningInput,
@@ -551,6 +552,15 @@ export const WsOrchestrationSendAgentPlanWorkerMessageRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationRetryAgentPlanCoordinationMessageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage,
+  {
+    payload: OrchestrationRetryAgentPlanCoordinationMessageInput,
+    success: OrchestrationRpcSchemas.retryAgentPlanCoordinationMessage.output,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsOrchestrationStartAgentPlanReviewRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.startAgentPlanReview,
   {
@@ -680,6 +690,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationApproveAgentPlanTasksRpc,
   WsOrchestrationLaunchAgentPlanReadyWorkersRpc,
   WsOrchestrationSendAgentPlanWorkerMessageRpc,
+  WsOrchestrationRetryAgentPlanCoordinationMessageRpc,
   WsOrchestrationStartAgentPlanReviewRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
