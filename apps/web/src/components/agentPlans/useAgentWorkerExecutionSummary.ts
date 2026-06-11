@@ -37,7 +37,7 @@ export function deriveAgentWorkerExecutionSummary(
     }
   }
 
-  const workLogEntries = deriveWorkLogEntries(thread.activities, undefined);
+  const workLogEntries = deriveWorkLogEntries(thread.activities);
   const recentCommands = workLogEntries
     .filter((entry) => entry.command || entry.rawCommand)
     .slice(-6)
