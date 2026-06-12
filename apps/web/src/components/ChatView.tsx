@@ -1,6 +1,7 @@
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
+  DEFAULT_THREAD_AGENT_METADATA,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type MessageId,
@@ -12,7 +13,7 @@ import {
   type ServerProvider,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
-  type ThreadId,
+  ThreadId,
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
@@ -102,7 +103,7 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -186,6 +187,8 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
+import { sortThreads } from "../lib/threadSort";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
@@ -236,6 +239,145 @@ type EnvironmentUnavailableState = {
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
+
+type WorkerThreadReport = {
+  readonly summary: string;
+  readonly status: string | null;
+  readonly createdAt: string;
+};
+
+function readWorkerReportPayload(payload: unknown): {
+  readonly workerThreadId: ThreadId;
+  readonly summary: string;
+  readonly status: string | null;
+} | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.workerThreadId !== "string" || typeof record.summary !== "string") {
+    return null;
+  }
+  return {
+    workerThreadId: ThreadId.make(record.workerThreadId),
+    summary: record.summary,
+    status: typeof record.status === "string" ? record.status : null,
+  };
+}
+
+function latestWorkerReport(
+  ownerThread: Thread,
+  workerThreadId: ThreadId,
+): WorkerThreadReport | null {
+  for (let index = ownerThread.activities.length - 1; index >= 0; index -= 1) {
+    const activity = ownerThread.activities[index];
+    if (!activity || activity.kind !== "worker.report") {
+      continue;
+    }
+    const payload = readWorkerReportPayload(activity.payload);
+    if (!payload || payload.workerThreadId !== workerThreadId) {
+      continue;
+    }
+    return {
+      summary: payload.summary,
+      status: payload.status,
+      createdAt: activity.createdAt,
+    };
+  }
+  return null;
+}
+
+function workerStatusClassName(status: string | null): string {
+  switch (status) {
+    case "done":
+      return "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "blocked":
+    case "failed":
+      return "border-destructive/35 bg-destructive/10 text-destructive";
+    case "cancelled":
+      return "border-muted-foreground/25 bg-muted text-muted-foreground";
+    case "running":
+    default:
+      return "border-sky-500/35 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+  }
+}
+
+function WorkerThreadsPanel(props: {
+  readonly ownerThread: Thread;
+  readonly workers: readonly Thread[];
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly onOpenWorker: (worker: Thread) => void;
+}) {
+  if (props.workers.length === 0) {
+    return null;
+  }
+
+  return (
+    <aside
+      className="hidden w-80 min-w-72 border-l border-border bg-background/95 lg:flex lg:flex-col"
+      data-testid="worker-threads-panel"
+    >
+      <button
+        type="button"
+        className="flex h-11 items-center justify-between border-b border-border px-3 text-left text-sm font-medium hover:bg-muted/50"
+        onClick={() => props.onOpenChange(!props.open)}
+      >
+        <span>Workers</span>
+        <span className="flex items-center gap-2 text-muted-foreground text-xs">
+          {props.workers.length}
+          {props.open ? (
+            <ChevronDownIcon className="size-3.5" />
+          ) : (
+            <ChevronRightIcon className="size-3.5" />
+          )}
+        </span>
+      </button>
+      {props.open ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <div className="space-y-1.5">
+            {props.workers.map((worker) => {
+              const metadata = worker.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA;
+              const report = latestWorkerReport(props.ownerThread, worker.id);
+              const status = report?.status ?? metadata.taskStatus ?? "running";
+              return (
+                <button
+                  key={worker.id}
+                  type="button"
+                  data-testid={`worker-thread-row-${worker.id}`}
+                  className="w-full rounded-md border border-border bg-card/70 p-2 text-left transition-colors hover:border-border/80 hover:bg-muted/50"
+                  onClick={() => props.onOpenWorker(worker)}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{worker.title}</div>
+                      <div className="truncate text-muted-foreground text-xs">
+                        {worker.branch ?? worker.worktreePath ?? "Worker thread"}
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] capitalize leading-none",
+                        workerStatusClassName(status),
+                      )}
+                    >
+                      {status}
+                    </span>
+                  </div>
+                  <div className="mt-2 line-clamp-2 text-muted-foreground text-xs">
+                    {report
+                      ? `${report.summary} · ${formatRelativeTimeLabel(report.createdAt)}`
+                      : metadata.taskTitle || "No report yet"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
 
 function eventTargetElement(target: EventTarget | null): Element | null {
   if (target instanceof Element) return target;
@@ -911,6 +1053,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [workerPanelOpen, setWorkerPanelOpen] = useState(true);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -956,12 +1099,13 @@ export default function ChatView(props: ChatViewProps) {
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
-  const serverThreadKeys = useStore(
-    useShallow((state) =>
-      selectThreadsAcrossEnvironments(state).map((thread) =>
+  const serverThreads = useStore(useShallow((state) => selectThreadsAcrossEnvironments(state)));
+  const serverThreadKeys = useMemo(
+    () =>
+      serverThreads.map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
-    ),
+    [serverThreads],
   );
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftThreadKeys = useMemo(
@@ -1045,6 +1189,25 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadAgentMetadata = activeThread?.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA;
+  const workerOwnerThreadId =
+    activeThread && activeThreadAgentMetadata.parentThreadId === null ? activeThread.id : null;
+  const workerThreadsForActiveOwner = useMemo(() => {
+    if (!activeThread || workerOwnerThreadId === null) {
+      return [];
+    }
+    return sortThreads(
+      serverThreads.filter((thread) => {
+        const metadata = thread.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA;
+        return (
+          thread.environmentId === activeThread.environmentId &&
+          thread.archivedAt === null &&
+          metadata.parentThreadId === workerOwnerThreadId
+        );
+      }),
+      "updated_at",
+    );
+  }, [activeThread, serverThreads, workerOwnerThreadId]);
 
   useEffect(() => {
     if (!activeThreadRef) {
@@ -3556,6 +3719,7 @@ export default function ChatView(props: ChatViewProps) {
         interactionMode: "default",
         branch: activeThreadBranch,
         worktreePath: activeThread.worktreePath,
+        agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
         createdAt,
       })
       .then(() => {
@@ -3775,6 +3939,18 @@ export default function ChatView(props: ChatViewProps) {
       });
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+  );
+  const onOpenWorkerThread = useCallback(
+    (worker: Thread) => {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: worker.environmentId,
+          threadId: worker.id,
+        },
+      });
+    },
+    [navigate],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
@@ -4019,6 +4195,14 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
         </div>
         {/* end chat column */}
+
+        <WorkerThreadsPanel
+          ownerThread={activeThread}
+          workers={workerThreadsForActiveOwner}
+          open={workerPanelOpen}
+          onOpenChange={setWorkerPanelOpen}
+          onOpenWorker={onOpenWorkerThread}
+        />
 
         {/* Plan sidebar */}
         {planSidebarOpen && !shouldUsePlanSidebarSheet ? (

@@ -62,19 +62,19 @@ const make = Effect.gen(function* () {
     return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
   };
 
-  const createForAgentTask: WorktreeManagerShape["createForAgentTask"] = (task) =>
+  const createForWorker: WorktreeManagerShape["createForWorker"] = (input) =>
     Effect.gen(function* () {
       const project = yield* projectionSnapshotQuery
-        .getProjectShellById(task.projectId)
+        .getProjectShellById(input.projectId)
         .pipe(
           Effect.mapError((cause) =>
-            toWorktreeError(cause, `Failed to load project ${task.projectId}.`),
+            toWorktreeError(cause, `Failed to load project ${input.projectId}.`),
           ),
         );
       if (Option.isNone(project)) {
         return yield* new OrchestrationDispatchCommandError({
-          message: `Project ${task.projectId} for task ${task.id} was not found.`,
-          cause: task.projectId,
+          message: `Project ${input.projectId} for worker ${input.taskKey} was not found.`,
+          cause: input.projectId,
         });
       }
 
@@ -106,9 +106,9 @@ const make = Effect.gen(function* () {
       }
 
       const branchName = [
-        "agent",
-        slugify(String(task.planId)),
-        taskBranchSegment(task.title, String(task.id)),
+        "worker",
+        slugify(input.delegationId),
+        taskBranchSegment(input.title, input.taskKey),
       ].join("/");
       const created = yield* gitWorkflow
         .createWorktree({
@@ -119,63 +119,85 @@ const make = Effect.gen(function* () {
         })
         .pipe(
           Effect.mapError((cause) =>
-            toWorktreeError(cause, `Failed to create worktree for task ${task.id}.`),
+            toWorktreeError(cause, `Failed to create worktree for worker ${input.taskKey}.`),
           ),
         );
 
       return {
-        planId: task.planId,
-        taskId: task.id,
         branchName: created.worktree.refName,
         worktreePath: created.worktree.path,
       };
     });
 
-  const removeForAgentTask: WorktreeManagerShape["removeForAgentTask"] = (task) =>
+  const removeForWorker: WorktreeManagerShape["removeForWorker"] = (input) =>
     Effect.gen(function* () {
-      if (task.worktreePath === null) {
-        return yield* new OrchestrationDispatchCommandError({
-          message: `Task ${task.id} has no worker worktree to remove.`,
-          cause: task.id,
-        });
-      }
       const project = yield* projectionSnapshotQuery
-        .getProjectShellById(task.projectId)
+        .getProjectShellById(input.projectId)
         .pipe(
           Effect.mapError((cause) =>
-            toWorktreeError(cause, `Failed to load project ${task.projectId}.`),
+            toWorktreeError(cause, `Failed to load project ${input.projectId}.`),
           ),
         );
       if (Option.isNone(project)) {
         return yield* new OrchestrationDispatchCommandError({
-          message: `Project ${task.projectId} for task ${task.id} was not found.`,
-          cause: task.projectId,
+          message: `Project ${input.projectId} for worker worktree cleanup was not found.`,
+          cause: input.projectId,
         });
       }
       const [candidatePath, worktreesRoot] = yield* Effect.all([
-        canonicalizePath(task.worktreePath),
+        canonicalizePath(input.worktreePath),
         canonicalizePath(config.worktreesDir),
       ]);
       if (!isWithinRoot(candidatePath, worktreesRoot)) {
         return yield* new OrchestrationDispatchCommandError({
-          message: `Refusing to remove worktree outside configured worktree root: ${task.worktreePath}.`,
-          cause: { worktreePath: task.worktreePath, worktreesRoot: config.worktreesDir },
+          message: `Refusing to remove worktree outside configured worktree root: ${input.worktreePath}.`,
+          cause: { worktreePath: input.worktreePath, worktreesRoot: config.worktreesDir },
         });
       }
       yield* gitWorkflow
         .removeWorktree({
           cwd: project.value.workspaceRoot,
-          path: task.worktreePath,
+          path: input.worktreePath,
           force: false,
         })
         .pipe(
           Effect.mapError((cause) =>
-            toWorktreeError(cause, `Failed to remove worktree ${task.worktreePath}.`),
+            toWorktreeError(cause, `Failed to remove worktree ${input.worktreePath}.`),
           ),
         );
     });
 
+  const createForAgentTask: WorktreeManagerShape["createForAgentTask"] = (task) =>
+    createForWorker({
+      projectId: task.projectId,
+      delegationId: String(task.planId),
+      taskKey: String(task.id),
+      title: task.title,
+    }).pipe(
+      Effect.map((created) => ({
+        planId: task.planId,
+        taskId: task.id,
+        branchName: created.branchName,
+        worktreePath: created.worktreePath,
+      })),
+    );
+
+  const removeForAgentTask: WorktreeManagerShape["removeForAgentTask"] = (task) =>
+    task.worktreePath === null
+      ? Effect.fail(
+          new OrchestrationDispatchCommandError({
+            message: `Task ${task.id} has no worker worktree to remove.`,
+            cause: task.id,
+          }),
+        )
+      : removeForWorker({
+          projectId: task.projectId,
+          worktreePath: task.worktreePath,
+        });
+
   return {
+    createForWorker,
+    removeForWorker,
     createForAgentTask,
     removeForAgentTask,
   } satisfies WorktreeManagerShape;

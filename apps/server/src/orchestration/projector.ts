@@ -6,6 +6,7 @@ import {
   AgentReview,
   AgentSharedUpdate,
   AgentTask,
+  DEFAULT_THREAD_AGENT_METADATA,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
@@ -21,6 +22,7 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  AgentPlanDeletedPayload,
   AgentContractUpsertedPayload,
   AgentCoordinationMessageUpsertedPayload,
   AgentPlanCreatedPayload,
@@ -29,6 +31,7 @@ import {
   AgentPlanUpdatedPayload,
   AgentSharedUpdateAppendedPayload,
   AgentTaskUpsertedPayload,
+  ThreadAgentMetadataUpdatedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -311,6 +314,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            agentMetadata: payload.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -377,6 +381,22 @@ export function projectEvent(
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.agent-metadata-updated":
+      return decodeForEvent(
+        ThreadAgentMetadataUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            agentMetadata: payload.agentMetadata,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -791,6 +811,17 @@ export function projectEvent(
           agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
             status: payload.status,
             updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "agent-plan.deleted":
+      return decodeForEvent(AgentPlanDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agentPlans: updateAgentPlan(nextBase.agentPlans, payload.planId, {
+            deletedAt: payload.deletedAt,
+            updatedAt: payload.deletedAt,
           }),
         })),
       );

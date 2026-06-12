@@ -6,6 +6,8 @@ import {
   AgentTaskId,
   CommandId,
   DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   MessageId,
   type AgentContract,
   type AgentCoordinationMessage,
@@ -429,8 +431,8 @@ const makeAgentPlanService = Effect.gen(function* () {
 
         const project = yield* loadProject(task.projectId);
         const modelSelection = resolveModelSelection(project, input.modelSelection);
-        const runtimeMode = input.runtimeMode ?? "approval-required";
-        const interactionMode = input.interactionMode ?? "default";
+        const runtimeMode = input.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+        const interactionMode = input.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
         const now = yield* nowIso;
         const workerThreadId = yield* threadId();
         const workerMessageId = yield* messageId();
@@ -800,8 +802,8 @@ const makeAgentPlanService = Effect.gen(function* () {
         const projectShells = yield* loadProjects(plan);
         const primaryProject = yield* resolvePrimaryProject(plan, projectShells);
         const modelSelection = resolveModelSelection(primaryProject, input.modelSelection);
-        const runtimeMode = input.runtimeMode ?? "approval-required";
-        const interactionMode = input.interactionMode ?? "plan";
+        const runtimeMode = input.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+        const interactionMode = input.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
         const now = yield* nowIso;
         const ownerThreadId = yield* threadId();
         const ownerMessageId = yield* messageId();
@@ -1313,8 +1315,8 @@ const makeAgentPlanService = Effect.gen(function* () {
         const projects = yield* loadProjects(plan);
         const primaryProject = yield* resolvePrimaryProject(plan, projects);
         const modelSelection = resolveModelSelection(primaryProject, input.modelSelection);
-        const runtimeMode = input.runtimeMode ?? "approval-required";
-        const interactionMode = input.interactionMode ?? "plan";
+        const runtimeMode = input.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+        const interactionMode = input.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
         const now = yield* nowIso;
         const reviewerThreadId = yield* threadId();
         const nextReviewId = yield* reviewId();

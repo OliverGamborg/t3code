@@ -72,6 +72,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "agent-plan.create":
     case "agent-plan.update":
     case "agent-plan.status.set":
+    case "agent-plan.delete":
     case "agent-task.upsert":
     case "agent-shared-update.append":
     case "agent-contract.upsert":

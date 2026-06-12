@@ -15,12 +15,14 @@ import {
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
   ThreadRevertedPayload as ContractsThreadRevertedPayloadSchema,
   ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
+  ThreadAgentMetadataUpdatedPayload as ContractsThreadAgentMetadataUpdatedPayloadSchema,
   ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
   ThreadTurnInterruptRequestedPayload as ContractsThreadTurnInterruptRequestedPayloadSchema,
   ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
   ThreadCheckpointRevertRequestedPayload as ContractsThreadCheckpointRevertRequestedPayloadSchema,
   ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
   AgentPlanCreatedPayload as ContractsAgentPlanCreatedPayloadSchema,
+  AgentPlanDeletedPayload as ContractsAgentPlanDeletedPayloadSchema,
   AgentPlanUpdatedPayload as ContractsAgentPlanUpdatedPayloadSchema,
   AgentPlanStatusChangedPayload as ContractsAgentPlanStatusChangedPayloadSchema,
   AgentTaskUpsertedPayload as ContractsAgentTaskUpsertedPayloadSchema,
@@ -49,6 +51,7 @@ export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;
 export const ThreadRevertedPayload = ContractsThreadRevertedPayloadSchema;
 export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
+export const ThreadAgentMetadataUpdatedPayload = ContractsThreadAgentMetadataUpdatedPayloadSchema;
 
 export const ThreadTurnStartRequestedPayload = ContractsThreadTurnStartRequestedPayloadSchema;
 export const ThreadTurnInterruptRequestedPayload =
@@ -62,6 +65,7 @@ export const ThreadSessionStopRequestedPayload = ContractsThreadSessionStopReque
 export const AgentPlanCreatedPayload = ContractsAgentPlanCreatedPayloadSchema;
 export const AgentPlanUpdatedPayload = ContractsAgentPlanUpdatedPayloadSchema;
 export const AgentPlanStatusChangedPayload = ContractsAgentPlanStatusChangedPayloadSchema;
+export const AgentPlanDeletedPayload = ContractsAgentPlanDeletedPayloadSchema;
 export const AgentTaskUpsertedPayload = ContractsAgentTaskUpsertedPayloadSchema;
 export const AgentSharedUpdateAppendedPayload = ContractsAgentSharedUpdateAppendedPayloadSchema;
 export const AgentContractUpsertedPayload = ContractsAgentContractUpsertedPayloadSchema;

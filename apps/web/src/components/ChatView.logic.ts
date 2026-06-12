@@ -1,5 +1,6 @@
 import {
   type EnvironmentId,
+  DEFAULT_THREAD_AGENT_METADATA,
   isProviderDriverKind,
   ProjectId,
   type ModelSelection,
@@ -51,6 +52,7 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
   };
 }
 

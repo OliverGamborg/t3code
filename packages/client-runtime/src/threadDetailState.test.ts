@@ -2,6 +2,7 @@ import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  DEFAULT_THREAD_AGENT_METADATA,
   EventId,
   EnvironmentId,
   MessageId,
@@ -56,6 +57,7 @@ const BASE_THREAD: OrchestrationThread = {
   activities: [],
   checkpoints: [],
   session: null,
+  agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
 };
 
 const TARGET = {

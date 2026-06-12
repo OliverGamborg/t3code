@@ -370,6 +370,9 @@ function makeProjection(input: {
           projectIds: plan.projectIds,
           primaryProjectId: plan.primaryProjectId,
           ownerThreadId: plan.ownerThreadId,
+          workerThreadIds: plan.tasks.flatMap((task) =>
+            task.workerThreadId !== null ? [task.workerThreadId] : [],
+          ),
           taskCount: plan.tasks.length,
           runningTaskCount: plan.tasks.filter((task) => task.status === "running").length,
           blockedTaskCount: plan.tasks.filter((task) => task.status === "blocked").length,
@@ -522,6 +525,15 @@ function runWithHarness(
           worktreePath: `/worktrees/${task.id}`,
         }),
       removeForAgentTask: () => Effect.void,
+      createForWorker: (input) =>
+        Effect.succeed({
+          projectId: input.projectId,
+          delegationId: input.delegationId,
+          taskKey: input.taskKey,
+          branchName: `worker/${input.taskKey}`,
+          worktreePath: `/worktrees/${input.taskKey}`,
+        }),
+      removeForWorker: () => Effect.void,
     };
     const layer = AgentCoordinationReactorLive.pipe(
       Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),

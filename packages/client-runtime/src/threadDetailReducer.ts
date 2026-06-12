@@ -12,6 +12,7 @@ import type {
   OrchestrationThreadActivity,
   TurnId,
 } from "@t3tools/contracts";
+import { DEFAULT_THREAD_AGENT_METADATA } from "@t3tools/contracts";
 
 /**
  * Retention limits for collections within a thread.
@@ -87,6 +88,7 @@ export function applyThreadDetailEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          agentMetadata: event.payload.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA,
           latestTurn: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
@@ -133,6 +135,16 @@ export function applyThreadDetailEvent(
           ...(event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
             : {}),
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
+    case "thread.agent-metadata-updated":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          agentMetadata: event.payload.agentMetadata,
           updatedAt: event.payload.updatedAt,
         },
       };

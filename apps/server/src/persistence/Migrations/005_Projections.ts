@@ -25,6 +25,7 @@ export default Effect.gen(function* () {
       model TEXT NOT NULL,
       branch TEXT,
       worktree_path TEXT,
+      agent_metadata_json TEXT NOT NULL DEFAULT '{"role":"user","parentThreadId":null,"delegationId":null,"taskKey":null,"taskTitle":null,"taskStatus":null}',
       latest_turn_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,

@@ -109,6 +109,8 @@ vi.mock("../lib/vcsStatusState", () => {
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const THREAD_TITLE = "Browser test thread";
+const FRONTEND_WORKER_THREAD_ID = "thread-worker-frontend" as ThreadId;
+const BACKEND_WORKER_THREAD_ID = "thread-worker-backend" as ThreadId;
 const ARCHIVED_SECONDARY_THREAD_ID = "thread-secondary-project-archived" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
 const SECOND_PROJECT_ID = "project-2" as ProjectId;
@@ -390,6 +392,120 @@ function createSnapshotForTargetUser(options: {
   };
 }
 
+function createSnapshotWithWorkerThreads(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-worker-owner" as MessageId,
+    targetText: "Create user button",
+  });
+  const ownerThread = snapshot.threads[0]!;
+  const delegationId = "delegation-create-user";
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        ...ownerThread,
+        title: "Create user button",
+        updatedAt: isoAt(120),
+        agentMetadata: {
+          role: "owner",
+          parentThreadId: null,
+          delegationId,
+          taskKey: null,
+          taskTitle: null,
+          taskStatus: null,
+        },
+        activities: [
+          {
+            id: EventId.make("activity-worker-report-frontend"),
+            tone: "tool",
+            kind: "worker.report",
+            summary: "Implement frontend button: Implemented button and wired API call.",
+            payload: {
+              workerThreadId: FRONTEND_WORKER_THREAD_ID,
+              workerTitle: "Implement frontend button",
+              taskKey: "frontend",
+              status: "done",
+              title: "Frontend button complete",
+              summary: "Implemented button and wired API call.",
+              details: "Button renders and calls the backend endpoint.",
+              changedFiles: ["apps/web/src/users/CreateUserButton.tsx"],
+              testResults: ["vp test apps/web/src/users/CreateUserButton.test.tsx passed"],
+              blockers: [],
+              needsOwnerResponse: false,
+              delivery: "visible",
+            },
+            turnId: null,
+            createdAt: isoAt(90),
+          },
+        ],
+      },
+      {
+        ...ownerThread,
+        id: FRONTEND_WORKER_THREAD_ID,
+        title: "Implement frontend button",
+        branch: "worker/create-user/frontend",
+        worktreePath: "/repo/project/.t3/worktrees/worker-frontend",
+        latestTurn: null,
+        createdAt: isoAt(10),
+        updatedAt: isoAt(100),
+        messages: [],
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        agentMetadata: {
+          role: "worker",
+          parentThreadId: THREAD_ID,
+          delegationId,
+          taskKey: "frontend",
+          taskTitle: "Implement frontend button",
+          taskStatus: "done",
+        },
+        session: {
+          threadId: FRONTEND_WORKER_THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: isoAt(100),
+        },
+      },
+      {
+        ...ownerThread,
+        id: BACKEND_WORKER_THREAD_ID,
+        title: "Implement backend user creation",
+        branch: "worker/create-user/backend",
+        worktreePath: "/repo/project/.t3/worktrees/worker-backend",
+        latestTurn: null,
+        createdAt: isoAt(11),
+        updatedAt: isoAt(80),
+        messages: [],
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        agentMetadata: {
+          role: "worker",
+          parentThreadId: THREAD_ID,
+          delegationId,
+          taskKey: "backend",
+          taskTitle: "Implement backend user creation",
+          taskStatus: "running",
+        },
+        session: {
+          threadId: BACKEND_WORKER_THREAD_ID,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: "turn-worker-backend" as TurnId,
+          lastError: null,
+          updatedAt: isoAt(80),
+        },
+      },
+    ],
+  };
+}
+
 function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   return {
     snapshot,
@@ -465,6 +581,7 @@ function toShellThread(thread: OrchestrationReadModel["threads"][number]) {
     interactionMode: thread.interactionMode,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    ...(thread.agentMetadata ? { agentMetadata: thread.agentMetadata } : {}),
     latestTurn: thread.latestTurn,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -4058,6 +4175,41 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(terminalIndicator).not.toBeNull();
         },
         { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows thread-native workers in the owner view and nests workers in the sidebar", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithWorkerThreads(),
+    });
+
+    try {
+      await expect.element(page.getByTestId("worker-threads-panel")).toBeInTheDocument();
+      await expect
+        .element(page.getByTestId(`worker-thread-row-${FRONTEND_WORKER_THREAD_ID}`))
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByTestId(`worker-thread-row-${BACKEND_WORKER_THREAD_ID}`))
+        .toBeInTheDocument();
+      await expect.element(page.getByText("Implemented button and wired API call.")).toBeVisible();
+
+      await expect.element(page.getByTestId(`thread-row-${THREAD_ID}`)).toBeInTheDocument();
+      await expect
+        .element(page.getByTestId(`thread-row-${FRONTEND_WORKER_THREAD_ID}`))
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByTestId(`thread-row-${BACKEND_WORKER_THREAD_ID}`))
+        .toBeInTheDocument();
+
+      await page.getByTestId(`worker-thread-row-${FRONTEND_WORKER_THREAD_ID}`).click();
+      await waitForURL(
+        mounted.router,
+        (pathname) => pathname === serverThreadPath(FRONTEND_WORKER_THREAD_ID),
+        "Worker row did not navigate to the child thread.",
       );
     } finally {
       await mounted.cleanup();

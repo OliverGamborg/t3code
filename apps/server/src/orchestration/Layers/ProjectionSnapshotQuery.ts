@@ -1,15 +1,4 @@
 import {
-  AgentContract,
-  AgentContractId,
-  AgentCoordinationMessage,
-  AgentPlan,
-  AgentPlanDetailSnapshot,
-  AgentPlanId,
-  AgentPlanShell,
-  AgentReview,
-  AgentSharedUpdate,
-  AgentTask,
-  AgentTaskId,
   ChatAttachment,
   CheckpointRef,
   IsoDateTime,
@@ -33,6 +22,7 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ThreadAgentMetadata,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
@@ -54,7 +44,6 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
-import { ProjectionAgentPlan } from "../../persistence/Services/ProjectionAgentPlans.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
@@ -73,8 +62,6 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
-const decodeAgentPlan = Schema.decodeUnknownEffect(AgentPlan);
-const decodeAgentPlanDetailSnapshot = Schema.decodeUnknownEffect(AgentPlanDetailSnapshot);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
@@ -91,6 +78,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    agentMetadata: Schema.fromJsonString(ThreadAgentMetadata),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -103,46 +91,6 @@ const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
-  }),
-);
-const ProjectionAgentPlanDbRowSchema = ProjectionAgentPlan.mapFields(
-  Struct.assign({
-    projectIds: Schema.fromJsonString(Schema.Array(ProjectId)),
-  }),
-);
-const ProjectionAgentTaskDbRowSchema = AgentTask.mapFields(
-  Struct.assign({
-    allowedPaths: Schema.fromJsonString(Schema.Array(Schema.String)),
-    blockedPaths: Schema.fromJsonString(Schema.Array(Schema.String)),
-    dependsOn: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-    relatedTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-    requiredContracts: Schema.fromJsonString(Schema.Array(AgentContractId)),
-    producedContracts: Schema.fromJsonString(Schema.Array(AgentContractId)),
-  }),
-);
-const ProjectionAgentSharedUpdateDbRowSchema = AgentSharedUpdate.mapFields(
-  Struct.assign({
-    relatedTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-  }),
-);
-const ProjectionAgentContractDbRowSchema = AgentContract.mapFields(
-  Struct.assign({
-    consumerTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-  }),
-);
-const ProjectionAgentCoordinationMessageDbRowSchema = AgentCoordinationMessage.mapFields(
-  Struct.assign({
-    toTaskIds: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-    toThreadIds: Schema.fromJsonString(Schema.Array(ThreadId)),
-    requiresResponse: Schema.Number,
-  }),
-);
-const ProjectionAgentReviewDbRowSchema = AgentReview.mapFields(
-  Struct.assign({
-    mergeOrder: Schema.fromJsonString(Schema.Array(AgentTaskId)),
-    requiredFixes: Schema.fromJsonString(Schema.Array(Schema.String)),
-    risks: Schema.fromJsonString(Schema.Array(Schema.String)),
-    testRecommendations: Schema.fromJsonString(Schema.Array(Schema.String)),
   }),
 );
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
@@ -161,19 +109,6 @@ const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
   threadCount: Schema.Number,
 });
-const ProjectionAgentPlanShellMetricsRowSchema = Schema.Struct({
-  planId: AgentPlanId,
-  taskCount: NonNegativeInt,
-  runningTaskCount: NonNegativeInt,
-  blockedTaskCount: NonNegativeInt,
-  doneTaskCount: NonNegativeInt,
-  contractCount: NonNegativeInt,
-  updateCount: NonNegativeInt,
-  coordinationMessageCount: NonNegativeInt,
-  reviewCount: NonNegativeInt,
-  latestUpdatedAt: IsoDateTime,
-});
-type ProjectionAgentPlanShellMetricsRow = typeof ProjectionAgentPlanShellMetricsRowSchema.Type;
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
 });
@@ -182,9 +117,6 @@ const ProjectIdLookupInput = Schema.Struct({
 });
 const ThreadIdLookupInput = Schema.Struct({
   threadId: ThreadId,
-});
-const AgentPlanIdLookupInput = Schema.Struct({
-  planId: AgentPlanId,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -217,7 +149,6 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-  ORCHESTRATION_PROJECTOR_NAMES.agentPlans,
 ] as const;
 
 function maxIso(left: string | null, right: string): string {
@@ -324,76 +255,6 @@ function mapProposedPlanRow(
   };
 }
 
-function mapCoordinationMessageRow(
-  row: Schema.Schema.Type<typeof ProjectionAgentCoordinationMessageDbRowSchema>,
-): AgentCoordinationMessage {
-  return {
-    ...row,
-    requiresResponse: row.requiresResponse !== 0,
-  };
-}
-
-function mapAgentPlan(input: {
-  readonly row: Schema.Schema.Type<typeof ProjectionAgentPlanDbRowSchema>;
-  readonly tasks?: ReadonlyArray<AgentTask>;
-  readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
-  readonly contracts?: ReadonlyArray<AgentContract>;
-  readonly coordinationMessages?: ReadonlyArray<AgentCoordinationMessage>;
-  readonly reviews?: ReadonlyArray<AgentReview>;
-}): AgentPlan {
-  return {
-    id: input.row.planId,
-    title: input.row.title,
-    userPrompt: input.row.userPrompt,
-    status: input.row.status,
-    projectIds: input.row.projectIds,
-    primaryProjectId: input.row.primaryProjectId,
-    ownerThreadId: input.row.ownerThreadId,
-    createdAt: input.row.createdAt,
-    updatedAt: input.row.updatedAt,
-    deletedAt: input.row.deletedAt,
-    tasks: [...(input.tasks ?? [])],
-    sharedUpdates: [...(input.sharedUpdates ?? [])],
-    contracts: [...(input.contracts ?? [])],
-    coordinationMessages: [...(input.coordinationMessages ?? [])],
-    reviews: [...(input.reviews ?? [])],
-  };
-}
-
-function mapAgentPlanShell(input: {
-  readonly row: Schema.Schema.Type<typeof ProjectionAgentPlanDbRowSchema>;
-  readonly tasks?: ReadonlyArray<AgentTask>;
-  readonly sharedUpdates?: ReadonlyArray<AgentSharedUpdate>;
-  readonly contracts?: ReadonlyArray<AgentContract>;
-  readonly coordinationMessages?: ReadonlyArray<AgentCoordinationMessage>;
-  readonly reviews?: ReadonlyArray<AgentReview>;
-  readonly metrics?: ProjectionAgentPlanShellMetricsRow;
-}): AgentPlanShell {
-  const tasks = input.tasks ?? [];
-  const metrics = input.metrics;
-  return {
-    id: input.row.planId,
-    title: input.row.title,
-    status: input.row.status,
-    projectIds: input.row.projectIds,
-    primaryProjectId: input.row.primaryProjectId,
-    ownerThreadId: input.row.ownerThreadId,
-    taskCount: metrics?.taskCount ?? tasks.length,
-    runningTaskCount:
-      metrics?.runningTaskCount ?? tasks.filter((task) => task.status === "running").length,
-    blockedTaskCount:
-      metrics?.blockedTaskCount ?? tasks.filter((task) => task.status === "blocked").length,
-    doneTaskCount: metrics?.doneTaskCount ?? tasks.filter((task) => task.status === "done").length,
-    contractCount: metrics?.contractCount ?? input.contracts?.length ?? 0,
-    updateCount: metrics?.updateCount ?? input.sharedUpdates?.length ?? 0,
-    coordinationMessageCount:
-      metrics?.coordinationMessageCount ?? input.coordinationMessages?.length ?? 0,
-    reviewCount: metrics?.reviewCount ?? input.reviews?.length ?? 0,
-    createdAt: input.row.createdAt,
-    updatedAt: metrics?.latestUpdatedAt ?? input.row.updatedAt,
-  };
-}
-
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
@@ -470,6 +331,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          agent_metadata_json AS "agentMetadata",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -498,6 +360,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          agent_metadata_json AS "agentMetadata",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -528,6 +391,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          agent_metadata_json AS "agentMetadata",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -798,424 +662,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
-  const listAgentPlanRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentPlanDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          plan_id AS "planId",
-          title,
-          user_prompt AS "userPrompt",
-          status,
-          owner_thread_id AS "ownerThreadId",
-          primary_project_id AS "primaryProjectId",
-          project_ids_json AS "projectIds",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
-        FROM projection_agent_plans
-        ORDER BY created_at ASC, plan_id ASC
-      `,
-  });
-
-  const listActiveAgentPlanRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentPlanDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          plan_id AS "planId",
-          title,
-          user_prompt AS "userPrompt",
-          status,
-          owner_thread_id AS "ownerThreadId",
-          primary_project_id AS "primaryProjectId",
-          project_ids_json AS "projectIds",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
-        FROM projection_agent_plans
-        WHERE deleted_at IS NULL
-        ORDER BY updated_at DESC, plan_id ASC
-      `,
-  });
-
-  const listActiveAgentPlanShellMetricRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentPlanShellMetricsRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          p.plan_id AS "planId",
-          COALESCE(t.task_count, 0) AS "taskCount",
-          COALESCE(t.running_task_count, 0) AS "runningTaskCount",
-          COALESCE(t.blocked_task_count, 0) AS "blockedTaskCount",
-          COALESCE(t.done_task_count, 0) AS "doneTaskCount",
-          COALESCE(c.contract_count, 0) AS "contractCount",
-          COALESCE(u.update_count, 0) AS "updateCount",
-          COALESCE(m.coordination_message_count, 0) AS "coordinationMessageCount",
-          COALESCE(r.review_count, 0) AS "reviewCount",
-          MAX(
-            p.updated_at,
-            COALESCE(t.latest_updated_at, p.updated_at),
-            COALESCE(c.latest_updated_at, p.updated_at),
-            COALESCE(u.latest_updated_at, p.updated_at),
-            COALESCE(m.latest_updated_at, p.updated_at),
-            COALESCE(r.latest_updated_at, p.updated_at)
-          ) AS "latestUpdatedAt"
-        FROM projection_agent_plans p
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS task_count,
-            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_task_count,
-            SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked_task_count,
-            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_task_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_tasks
-          GROUP BY plan_id
-        ) t ON t.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS contract_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_contracts
-          GROUP BY plan_id
-        ) c ON c.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS update_count,
-            MAX(created_at) AS latest_updated_at
-          FROM projection_agent_shared_updates
-          GROUP BY plan_id
-        ) u ON u.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS coordination_message_count,
-            MAX(created_at) AS latest_updated_at
-          FROM projection_agent_coordination_messages
-          GROUP BY plan_id
-        ) m ON m.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS review_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_reviews
-          GROUP BY plan_id
-        ) r ON r.plan_id = p.plan_id
-        WHERE p.deleted_at IS NULL
-        ORDER BY p.updated_at DESC, p.plan_id ASC
-      `,
-  });
-
-  const getActiveAgentPlanShellMetricRowByPlan = SqlSchema.findOneOption({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentPlanShellMetricsRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          p.plan_id AS "planId",
-          COALESCE(t.task_count, 0) AS "taskCount",
-          COALESCE(t.running_task_count, 0) AS "runningTaskCount",
-          COALESCE(t.blocked_task_count, 0) AS "blockedTaskCount",
-          COALESCE(t.done_task_count, 0) AS "doneTaskCount",
-          COALESCE(c.contract_count, 0) AS "contractCount",
-          COALESCE(u.update_count, 0) AS "updateCount",
-          COALESCE(m.coordination_message_count, 0) AS "coordinationMessageCount",
-          COALESCE(r.review_count, 0) AS "reviewCount",
-          MAX(
-            p.updated_at,
-            COALESCE(t.latest_updated_at, p.updated_at),
-            COALESCE(c.latest_updated_at, p.updated_at),
-            COALESCE(u.latest_updated_at, p.updated_at),
-            COALESCE(m.latest_updated_at, p.updated_at),
-            COALESCE(r.latest_updated_at, p.updated_at)
-          ) AS "latestUpdatedAt"
-        FROM projection_agent_plans p
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS task_count,
-            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_task_count,
-            SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked_task_count,
-            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_task_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_tasks
-          GROUP BY plan_id
-        ) t ON t.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS contract_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_contracts
-          GROUP BY plan_id
-        ) c ON c.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS update_count,
-            MAX(created_at) AS latest_updated_at
-          FROM projection_agent_shared_updates
-          GROUP BY plan_id
-        ) u ON u.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS coordination_message_count,
-            MAX(created_at) AS latest_updated_at
-          FROM projection_agent_coordination_messages
-          GROUP BY plan_id
-        ) m ON m.plan_id = p.plan_id
-        LEFT JOIN (
-          SELECT
-            plan_id,
-            COUNT(*) AS review_count,
-            MAX(updated_at) AS latest_updated_at
-          FROM projection_agent_reviews
-          GROUP BY plan_id
-        ) r ON r.plan_id = p.plan_id
-        WHERE p.plan_id = ${planId}
-          AND p.deleted_at IS NULL
-        LIMIT 1
-      `,
-  });
-
-  const getActiveAgentPlanRowById = SqlSchema.findOneOption({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentPlanDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          plan_id AS "planId",
-          title,
-          user_prompt AS "userPrompt",
-          status,
-          owner_thread_id AS "ownerThreadId",
-          primary_project_id AS "primaryProjectId",
-          project_ids_json AS "projectIds",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
-        FROM projection_agent_plans
-        WHERE plan_id = ${planId}
-          AND deleted_at IS NULL
-        LIMIT 1
-      `,
-  });
-
-  const listAgentTaskRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentTaskDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          task_id AS "id",
-          plan_id AS "planId",
-          title,
-          description,
-          status,
-          project_id AS "projectId",
-          worker_thread_id AS "workerThreadId",
-          worktree_path AS "worktreePath",
-          branch_name AS "branchName",
-          allowed_paths_json AS "allowedPaths",
-          blocked_paths_json AS "blockedPaths",
-          depends_on_json AS "dependsOn",
-          related_task_ids_json AS "relatedTaskIds",
-          required_contract_ids_json AS "requiredContracts",
-          produced_contract_ids_json AS "producedContracts",
-          assigned_provider AS "assignedProvider",
-          summary,
-          risk_notes AS "riskNotes",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_agent_tasks
-        ORDER BY plan_id ASC, created_at ASC, task_id ASC
-      `,
-  });
-
-  const listAgentTaskRowsByPlan = SqlSchema.findAll({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentTaskDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          task_id AS "id",
-          plan_id AS "planId",
-          title,
-          description,
-          status,
-          project_id AS "projectId",
-          worker_thread_id AS "workerThreadId",
-          worktree_path AS "worktreePath",
-          branch_name AS "branchName",
-          allowed_paths_json AS "allowedPaths",
-          blocked_paths_json AS "blockedPaths",
-          depends_on_json AS "dependsOn",
-          related_task_ids_json AS "relatedTaskIds",
-          required_contract_ids_json AS "requiredContracts",
-          produced_contract_ids_json AS "producedContracts",
-          assigned_provider AS "assignedProvider",
-          summary,
-          risk_notes AS "riskNotes",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_agent_tasks
-        WHERE plan_id = ${planId}
-        ORDER BY created_at ASC, task_id ASC
-      `,
-  });
-
-  const listAgentSharedUpdateRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentSharedUpdateDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          update_id AS "id",
-          plan_id AS "planId",
-          task_id AS "taskId",
-          type,
-          title,
-          body,
-          visibility,
-          related_task_ids_json AS "relatedTaskIds",
-          created_at AS "createdAt"
-        FROM projection_agent_shared_updates
-        ORDER BY plan_id ASC, created_at ASC, update_id ASC
-      `,
-  });
-
-  const listAgentSharedUpdateRowsByPlan = SqlSchema.findAll({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentSharedUpdateDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          update_id AS "id",
-          plan_id AS "planId",
-          task_id AS "taskId",
-          type,
-          title,
-          body,
-          visibility,
-          related_task_ids_json AS "relatedTaskIds",
-          created_at AS "createdAt"
-        FROM projection_agent_shared_updates
-        WHERE plan_id = ${planId}
-        ORDER BY created_at ASC, update_id ASC
-      `,
-  });
-
-  const listAgentContractRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionAgentContractDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          contract_id AS "id",
-          plan_id AS "planId",
-          producer_task_id AS "producerTaskId",
-          consumer_task_ids_json AS "consumerTaskIds",
-          type,
-          title,
-          description,
-          status,
-          version,
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_agent_contracts
-        ORDER BY plan_id ASC, created_at ASC, contract_id ASC
-      `,
-  });
-
-  const listAgentContractRowsByPlan = SqlSchema.findAll({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentContractDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          contract_id AS "id",
-          plan_id AS "planId",
-          producer_task_id AS "producerTaskId",
-          consumer_task_ids_json AS "consumerTaskIds",
-          type,
-          title,
-          description,
-          status,
-          version,
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_agent_contracts
-        WHERE plan_id = ${planId}
-        ORDER BY created_at ASC, contract_id ASC
-      `,
-  });
-
-  const listAgentCoordinationMessageRowsByPlan = SqlSchema.findAll({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentCoordinationMessageDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          message_id AS "id",
-          plan_id AS "planId",
-          dedupe_key AS "dedupeKey",
-          kind,
-          status,
-          from_role AS "fromRole",
-          from_task_id AS "fromTaskId",
-          from_thread_id AS "fromThreadId",
-          to_target AS "toTarget",
-          to_task_ids_json AS "toTaskIds",
-          to_thread_ids_json AS "toThreadIds",
-          source_message_id AS "sourceMessageId",
-          source_turn_id AS "sourceTurnId",
-          correlation_id AS "correlationId",
-          title,
-          body,
-          requires_response AS "requiresResponse",
-          delivery_attempts AS "deliveryAttempts",
-          created_at AS "createdAt",
-          sent_at AS "sentAt",
-          acknowledged_at AS "acknowledgedAt",
-          failed_at AS "failedAt",
-          failure_reason AS "failureReason"
-        FROM projection_agent_coordination_messages
-        WHERE plan_id = ${planId}
-        ORDER BY created_at ASC, message_id ASC
-      `,
-  });
-
-  const listAgentReviewRowsByPlan = SqlSchema.findAll({
-    Request: AgentPlanIdLookupInput,
-    Result: ProjectionAgentReviewDbRowSchema,
-    execute: ({ planId }) =>
-      sql`
-        SELECT
-          review_id AS "id",
-          plan_id AS "planId",
-          reviewer_thread_id AS "reviewerThreadId",
-          status,
-          summary,
-          merge_order_json AS "mergeOrder",
-          required_fixes_json AS "requiredFixes",
-          risks_json AS "risks",
-          test_recommendations_json AS "testRecommendations",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_agent_reviews
-        WHERE plan_id = ${planId}
-        ORDER BY created_at ASC, review_id ASC
-      `,
-  });
-
   const getActiveProjectRowByWorkspaceRoot = SqlSchema.findOneOption({
     Request: WorkspaceRootLookupInput,
     Result: ProjectionProjectLookupRowSchema,
@@ -1308,6 +754,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          agent_metadata_json AS "agentMetadata",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1557,38 +1004,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listAgentPlanRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getSnapshot:listAgentPlans:query",
-                "ProjectionSnapshotQuery.getSnapshot:listAgentPlans:decodeRows",
-              ),
-            ),
-          ),
-          listAgentTaskRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getSnapshot:listAgentTasks:query",
-                "ProjectionSnapshotQuery.getSnapshot:listAgentTasks:decodeRows",
-              ),
-            ),
-          ),
-          listAgentSharedUpdateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getSnapshot:listAgentSharedUpdates:query",
-                "ProjectionSnapshotQuery.getSnapshot:listAgentSharedUpdates:decodeRows",
-              ),
-            ),
-          ),
-          listAgentContractRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getSnapshot:listAgentContracts:query",
-                "ProjectionSnapshotQuery.getSnapshot:listAgentContracts:decodeRows",
-              ),
-            ),
-          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1610,10 +1025,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             sessionRows,
             checkpointRows,
             latestTurnRows,
-            agentPlanRows,
-            agentTaskRows,
-            agentSharedUpdateRows,
-            agentContractRows,
             stateRows,
           ]) =>
             Effect.gen(function* () {
@@ -1623,9 +1034,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
               const sessionsByThread = new Map<string, OrchestrationSession>();
               const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
-              const tasksByPlan = new Map<string, Array<AgentTask>>();
-              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
-              const contractsByPlan = new Map<string, Array<AgentContract>>();
 
               let updatedAt: string | null = null;
 
@@ -1637,27 +1045,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               }
               for (const row of stateRows) {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
-              for (const row of agentPlanRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
-              for (const row of agentTaskRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const tasks = tasksByPlan.get(row.planId) ?? [];
-                tasks.push(row);
-                tasksByPlan.set(row.planId, tasks);
-              }
-              for (const row of agentSharedUpdateRows) {
-                updatedAt = maxIso(updatedAt, row.createdAt);
-                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
-                sharedUpdates.push(row);
-                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
-              }
-              for (const row of agentContractRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const contracts = contractsByPlan.get(row.planId) ?? [];
-                contracts.push(row);
-                contractsByPlan.set(row.planId, contracts);
               }
 
               for (const row of messageRows) {
@@ -1800,6 +1187,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 interactionMode: row.interactionMode,
                 branch: row.branch,
                 worktreePath: row.worktreePath,
+                agentMetadata: row.agentMetadata,
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -1812,20 +1200,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 session: sessionsByThread.get(row.threadId) ?? null,
               }));
 
-              const agentPlans: ReadonlyArray<AgentPlan> = agentPlanRows.map((row) =>
-                mapAgentPlan({
-                  row,
-                  tasks: tasksByPlan.get(row.planId) ?? [],
-                  sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
-                  contracts: contractsByPlan.get(row.planId) ?? [],
-                }),
-              );
-
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
-                agentPlans,
+                agentPlans: [],
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -1888,38 +1267,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listAgentPlanRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentPlans:query",
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentPlans:decodeRows",
-              ),
-            ),
-          ),
-          listAgentTaskRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentTasks:query",
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentTasks:decodeRows",
-              ),
-            ),
-          ),
-          listAgentSharedUpdateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentSharedUpdates:query",
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentSharedUpdates:decodeRows",
-              ),
-            ),
-          ),
-          listAgentContractRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentContracts:query",
-                "ProjectionSnapshotQuery.getCommandReadModel:listAgentContracts:decodeRows",
-              ),
-            ),
-          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1932,25 +1279,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([
-            projectRows,
-            threadRows,
-            proposedPlanRows,
-            sessionRows,
-            latestTurnRows,
-            agentPlanRows,
-            agentTaskRows,
-            agentSharedUpdateRows,
-            agentContractRows,
-            stateRows,
-          ]) =>
+          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
-              const tasksByPlan = new Map<string, Array<AgentTask>>();
-              const sharedUpdatesByPlan = new Map<string, Array<AgentSharedUpdate>>();
-              const contractsByPlan = new Map<string, Array<AgentContract>>();
 
               for (let index = 0; index < projectRows.length; index += 1) {
                 const row = projectRows[index];
@@ -2003,43 +1336,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   updatedAt = maxIso(updatedAt, row.completedAt);
                 }
               }
-              for (let index = 0; index < agentPlanRows.length; index += 1) {
-                const row = agentPlanRows[index];
-                if (!row) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
-              for (let index = 0; index < agentTaskRows.length; index += 1) {
-                const row = agentTaskRows[index];
-                if (!row) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const tasks = tasksByPlan.get(row.planId) ?? [];
-                tasks.push(row);
-                tasksByPlan.set(row.planId, tasks);
-              }
-              for (let index = 0; index < agentSharedUpdateRows.length; index += 1) {
-                const row = agentSharedUpdateRows[index];
-                if (!row) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.createdAt);
-                const sharedUpdates = sharedUpdatesByPlan.get(row.planId) ?? [];
-                sharedUpdates.push(row);
-                sharedUpdatesByPlan.set(row.planId, sharedUpdates);
-              }
-              for (let index = 0; index < agentContractRows.length; index += 1) {
-                const row = agentContractRows[index];
-                if (!row) {
-                  continue;
-                }
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-                const contracts = contractsByPlan.get(row.planId) ?? [];
-                contracts.push(row);
-                contractsByPlan.set(row.planId, contracts);
-              }
               for (let index = 0; index < stateRows.length; index += 1) {
                 const row = stateRows[index];
                 if (!row) {
@@ -2091,6 +1387,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   interactionMode: row.interactionMode,
                   branch: row.branch,
                   worktreePath: row.worktreePath,
+                  agentMetadata: row.agentMetadata,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2104,20 +1401,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 });
               }
 
-              const agentPlans: AgentPlan[] = agentPlanRows.map((row) =>
-                mapAgentPlan({
-                  row,
-                  tasks: tasksByPlan.get(row.planId) ?? [],
-                  sharedUpdates: sharedUpdatesByPlan.get(row.planId) ?? [],
-                  contracts: contractsByPlan.get(row.planId) ?? [],
-                }),
-              );
-
               return {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
-                agentPlans,
+                agentPlans: [],
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),
@@ -2166,22 +1454,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listActiveAgentPlanRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlans:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlans:decodeRows",
-              ),
-            ),
-          ),
-          listActiveAgentPlanShellMetricRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlanShellMetrics:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listAgentPlanShellMetrics:decodeRows",
-              ),
-            ),
-          ),
           listProjectionStateRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2193,106 +1465,84 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ]),
       )
       .pipe(
-        Effect.flatMap(
-          ([
-            projectRows,
-            threadRows,
-            sessionRows,
-            latestTurnRows,
-            agentPlanRows,
-            agentPlanShellMetricRows,
-            stateRows,
-          ]) =>
-            Effect.gen(function* () {
-              let updatedAt: string | null = null;
-              for (const row of projectRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
+        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+          Effect.gen(function* () {
+            let updatedAt: string | null = null;
+            for (const row of projectRows) {
+              updatedAt = maxIso(updatedAt, row.updatedAt);
+            }
+            for (const row of threadRows) {
+              updatedAt = maxIso(updatedAt, row.updatedAt);
+            }
+            for (const row of sessionRows) {
+              updatedAt = maxIso(updatedAt, row.updatedAt);
+            }
+            for (const row of latestTurnRows) {
+              updatedAt = maxIso(updatedAt, row.requestedAt);
+              if (row.startedAt !== null) {
+                updatedAt = maxIso(updatedAt, row.startedAt);
               }
-              for (const row of threadRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
+              if (row.completedAt !== null) {
+                updatedAt = maxIso(updatedAt, row.completedAt);
               }
-              for (const row of sessionRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
-              for (const row of latestTurnRows) {
-                updatedAt = maxIso(updatedAt, row.requestedAt);
-                if (row.startedAt !== null) {
-                  updatedAt = maxIso(updatedAt, row.startedAt);
-                }
-                if (row.completedAt !== null) {
-                  updatedAt = maxIso(updatedAt, row.completedAt);
-                }
-              }
-              const metricsByPlan = new Map(
-                agentPlanShellMetricRows.map((row) => [row.planId, row] as const),
-              );
-              for (const row of agentPlanRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
-              for (const row of agentPlanShellMetricRows) {
-                updatedAt = maxIso(updatedAt, row.latestUpdatedAt);
-              }
-              for (const row of stateRows) {
-                updatedAt = maxIso(updatedAt, row.updatedAt);
-              }
+            }
+            for (const row of stateRows) {
+              updatedAt = maxIso(updatedAt, row.updatedAt);
+            }
 
-              const repositoryIdentities =
-                yield* resolveRepositoryIdentitiesForProjects(projectRows);
-              const latestTurnByThread = new Map(
-                latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
-              );
-              const sessionByThread = new Map(
-                sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
-              );
+            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(projectRows);
+            const latestTurnByThread = new Map(
+              latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
+            );
+            const sessionByThread = new Map(
+              sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
+            );
 
-              const snapshot = {
-                snapshotSequence: computeSnapshotSequence(stateRows),
-                projects: Arr.filterMap(projectRows, (row) =>
-                  row.deletedAt === null
-                    ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
-                      )
-                    : Result.failVoid,
-                ),
-                threads: Arr.filterMap(threadRows, (row) =>
-                  row.deletedAt === null
-                    ? Result.succeed({
-                        id: row.threadId,
-                        projectId: row.projectId,
-                        title: row.title,
-                        modelSelection: row.modelSelection,
-                        runtimeMode: row.runtimeMode,
-                        interactionMode: row.interactionMode,
-                        branch: row.branch,
-                        worktreePath: row.worktreePath,
-                        latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                        createdAt: row.createdAt,
-                        updatedAt: row.updatedAt,
-                        archivedAt: row.archivedAt,
-                        session: sessionByThread.get(row.threadId) ?? null,
-                        latestUserMessageAt: row.latestUserMessageAt,
-                        hasPendingApprovals: row.pendingApprovalCount > 0,
-                        hasPendingUserInput: row.pendingUserInputCount > 0,
-                        hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                      } satisfies OrchestrationThreadShell)
-                    : Result.failVoid,
-                ),
-                agentPlans: agentPlanRows.map((row) =>
-                  metricsByPlan.has(row.planId)
-                    ? mapAgentPlanShell({ row, metrics: metricsByPlan.get(row.planId)! })
-                    : mapAgentPlanShell({ row }),
-                ),
-                updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
-              };
+            const snapshot = {
+              snapshotSequence: computeSnapshotSequence(stateRows),
+              projects: Arr.filterMap(projectRows, (row) =>
+                row.deletedAt === null
+                  ? Result.succeed(
+                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                    )
+                  : Result.failVoid,
+              ),
+              threads: Arr.filterMap(threadRows, (row) =>
+                row.deletedAt === null
+                  ? Result.succeed({
+                      id: row.threadId,
+                      projectId: row.projectId,
+                      title: row.title,
+                      modelSelection: row.modelSelection,
+                      runtimeMode: row.runtimeMode,
+                      interactionMode: row.interactionMode,
+                      branch: row.branch,
+                      worktreePath: row.worktreePath,
+                      agentMetadata: row.agentMetadata,
+                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                      createdAt: row.createdAt,
+                      updatedAt: row.updatedAt,
+                      archivedAt: row.archivedAt,
+                      session: sessionByThread.get(row.threadId) ?? null,
+                      latestUserMessageAt: row.latestUserMessageAt,
+                      hasPendingApprovals: row.pendingApprovalCount > 0,
+                      hasPendingUserInput: row.pendingUserInputCount > 0,
+                      hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                    } satisfies OrchestrationThreadShell)
+                  : Result.failVoid,
+              ),
+              agentPlans: [],
+              updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
+            };
 
-              return yield* decodeShellSnapshot(snapshot).pipe(
-                Effect.mapError(
-                  toPersistenceDecodeError(
-                    "ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot",
-                  ),
+            return yield* decodeShellSnapshot(snapshot).pipe(
+              Effect.mapError(
+                toPersistenceDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot",
                 ),
-              );
-            }),
+              ),
+            );
+          }),
         ),
         Effect.mapError((error) => {
           if (isPersistenceError(error)) {
@@ -2404,6 +1654,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   interactionMode: row.interactionMode,
                   branch: row.branch,
                   worktreePath: row.worktreePath,
+                  agentMetadata: row.agentMetadata,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2644,6 +1895,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
         worktreePath: threadRow.value.worktreePath,
+        agentMetadata: threadRow.value.agentMetadata,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2738,6 +1990,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
         worktreePath: threadRow.value.worktreePath,
+        agentMetadata: threadRow.value.agentMetadata,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2795,139 +2048,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
-  const getAgentPlanShellById: ProjectionSnapshotQueryShape["getAgentPlanShellById"] = (planId) =>
-    Effect.gen(function* () {
-      const [planRow, metricsRow] = yield* Effect.all([
-        getActiveAgentPlanRowById({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanShellById:getPlan:query",
-              "ProjectionSnapshotQuery.getAgentPlanShellById:getPlan:decodeRow",
-            ),
-          ),
-        ),
-        getActiveAgentPlanShellMetricRowByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanShellById:getMetrics:query",
-              "ProjectionSnapshotQuery.getAgentPlanShellById:getMetrics:decodeRow",
-            ),
-          ),
-        ),
-      ]);
+  const getAgentPlanShellById: ProjectionSnapshotQueryShape["getAgentPlanShellById"] = () =>
+    Effect.succeed(Option.none());
 
-      if (Option.isNone(planRow)) {
-        return Option.none<AgentPlanShell>();
-      }
-
-      return Option.some(
-        Option.isSome(metricsRow)
-          ? mapAgentPlanShell({ row: planRow.value, metrics: metricsRow.value })
-          : mapAgentPlanShell({ row: planRow.value }),
-      );
-    });
-
-  const getAgentPlanDetailById: ProjectionSnapshotQueryShape["getAgentPlanDetailById"] = (planId) =>
-    Effect.gen(function* () {
-      const [
-        planRow,
-        taskRows,
-        sharedUpdateRows,
-        contractRows,
-        coordinationMessageRows,
-        reviewRows,
-        stateRows,
-      ] = yield* Effect.all([
-        getActiveAgentPlanRowById({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:getPlan:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:getPlan:decodeRow",
-            ),
-          ),
-        ),
-        listAgentTaskRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listTasks:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listTasks:decodeRows",
-            ),
-          ),
-        ),
-        listAgentSharedUpdateRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listUpdates:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listUpdates:decodeRows",
-            ),
-          ),
-        ),
-        listAgentContractRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listContracts:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listContracts:decodeRows",
-            ),
-          ),
-        ),
-        listAgentCoordinationMessageRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listCoordinationMessages:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listCoordinationMessages:decodeRows",
-            ),
-          ),
-        ),
-        listAgentReviewRowsByPlan({ planId }).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listReviews:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listReviews:decodeRows",
-            ),
-          ),
-        ),
-        listProjectionStateRows(undefined).pipe(
-          Effect.mapError(
-            toPersistenceSqlOrDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listProjectionState:query",
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:listProjectionState:decodeRows",
-            ),
-          ),
-        ),
-      ]);
-
-      if (Option.isNone(planRow)) {
-        return Option.none<AgentPlanDetailSnapshot>();
-      }
-
-      const plan = yield* decodeAgentPlan(
-        mapAgentPlan({
-          row: planRow.value,
-          tasks: taskRows,
-          sharedUpdates: sharedUpdateRows,
-          contracts: contractRows,
-          coordinationMessages: coordinationMessageRows.map(mapCoordinationMessageRow),
-          reviews: reviewRows,
-        }),
-      ).pipe(
-        Effect.mapError(
-          toPersistenceDecodeError("ProjectionSnapshotQuery.getAgentPlanDetailById:decodePlan"),
-        ),
-      );
-
-      return Option.some(
-        yield* decodeAgentPlanDetailSnapshot({
-          snapshotSequence: computeSnapshotSequence(stateRows),
-          plan,
-        }).pipe(
-          Effect.mapError(
-            toPersistenceDecodeError(
-              "ProjectionSnapshotQuery.getAgentPlanDetailById:decodeSnapshot",
-            ),
-          ),
-        ),
-      );
-    });
+  const getAgentPlanDetailById: ProjectionSnapshotQueryShape["getAgentPlanDetailById"] = () =>
+    Effect.succeed(Option.none());
 
   return {
     getCommandReadModel,

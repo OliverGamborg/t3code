@@ -510,6 +510,7 @@ describe("incremental orchestration updates", () => {
           projectIds: [projectId],
           primaryProjectId: projectId,
           ownerThreadId: null,
+          workerThreadIds: [],
           taskCount: 2,
           runningTaskCount: 1,
           blockedTaskCount: 0,

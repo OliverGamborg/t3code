@@ -56,28 +56,13 @@ import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from ".
 import * as Schema from "effect/Schema";
 import type {
   ClientOrchestrationCommand,
-  OrchestrationApproveAgentPlanTasksInput,
-  OrchestrationGetAgentPlanInput,
-  OrchestrationGetAgentPlanResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
-  OrchestrationImportAgentPlanOwnerOutputInput,
-  OrchestrationImportAgentPlanOwnerOutputResult,
-  OrchestrationLaunchAgentPlanReadyWorkersInput,
-  OrchestrationLaunchAgentPlanReadyWorkersResult,
-  OrchestrationRetryAgentPlanCoordinationMessageInput,
-  OrchestrationSendAgentPlanWorkerMessageInput,
-  OrchestrationStartAgentPlanReviewInput,
-  OrchestrationStartAgentPlanReviewResult,
-  OrchestrationStartAgentPlanOwnerPlanningInput,
-  OrchestrationStartAgentPlanOwnerPlanningResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamItem,
-  OrchestrationSubscribeAgentPlanInput,
   OrchestrationSubscribeThreadInput,
-  OrchestrationAgentPlanStreamItem,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
@@ -620,30 +605,6 @@ export interface EnvironmentApi {
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
-    getAgentPlan: (
-      input: OrchestrationGetAgentPlanInput,
-    ) => Promise<OrchestrationGetAgentPlanResult>;
-    startAgentPlanOwnerPlanning: (
-      input: OrchestrationStartAgentPlanOwnerPlanningInput,
-    ) => Promise<OrchestrationStartAgentPlanOwnerPlanningResult>;
-    importAgentPlanOwnerOutput: (
-      input: OrchestrationImportAgentPlanOwnerOutputInput,
-    ) => Promise<OrchestrationImportAgentPlanOwnerOutputResult>;
-    approveAgentPlanTasks: (
-      input: OrchestrationApproveAgentPlanTasksInput,
-    ) => Promise<OrchestrationLaunchAgentPlanReadyWorkersResult>;
-    launchAgentPlanReadyWorkers: (
-      input: OrchestrationLaunchAgentPlanReadyWorkersInput,
-    ) => Promise<OrchestrationLaunchAgentPlanReadyWorkersResult>;
-    sendAgentPlanWorkerMessage: (
-      input: OrchestrationSendAgentPlanWorkerMessageInput,
-    ) => Promise<{ sequence: number }>;
-    retryAgentPlanCoordinationMessage: (
-      input: OrchestrationRetryAgentPlanCoordinationMessageInput,
-    ) => Promise<{ sequence: number }>;
-    startAgentPlanReview: (
-      input: OrchestrationStartAgentPlanReviewInput,
-    ) => Promise<OrchestrationStartAgentPlanReviewResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {
@@ -653,13 +614,6 @@ export interface EnvironmentApi {
     subscribeThread: (
       input: OrchestrationSubscribeThreadInput,
       callback: (event: OrchestrationThreadStreamItem) => void,
-      options?: {
-        onResubscribe?: () => void;
-      },
-    ) => () => void;
-    subscribeAgentPlan: (
-      input: OrchestrationSubscribeAgentPlanInput,
-      callback: (event: OrchestrationAgentPlanStreamItem) => void,
       options?: {
         onResubscribe?: () => void;
       },

@@ -106,19 +106,10 @@ const rpcClientMock = {
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     getArchivedShellSnapshot: vi.fn(),
-    getAgentPlan: vi.fn(),
-    startAgentPlanOwnerPlanning: vi.fn(),
-    importAgentPlanOwnerOutput: vi.fn(),
-    approveAgentPlanTasks: vi.fn(),
-    launchAgentPlanReadyWorkers: vi.fn(),
-    sendAgentPlanWorkerMessage: vi.fn(),
-    retryAgentPlanCoordinationMessage: vi.fn(),
-    startAgentPlanReview: vi.fn(),
     subscribeShell: vi.fn((listener: (event: OrchestrationShellStreamItem) => void) =>
       registerListener(shellStreamListeners, listener),
     ),
     subscribeThread: vi.fn(() => () => undefined),
-    subscribeAgentPlan: vi.fn(() => () => undefined),
   },
 };
 

@@ -17,6 +17,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   AgentPlanShell,
+  ThreadAgentMetadata,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -116,6 +117,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  agentMetadata?: ThreadAgentMetadata;
 }
 
 export interface ThreadShell {
@@ -133,6 +135,7 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  agentMetadata?: ThreadAgentMetadata;
 }
 
 export interface ThreadTurnState {
@@ -157,6 +160,7 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  agentMetadata?: ThreadAgentMetadata;
 }
 
 export interface AgentPlanSummary extends AgentPlanShell {

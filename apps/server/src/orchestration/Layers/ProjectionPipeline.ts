@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  DEFAULT_THREAD_AGENT_METADATA,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
@@ -24,7 +25,6 @@ import {
   type ProjectionThreadMessage,
   ProjectionThreadMessageRepository,
 } from "../../persistence/Services/ProjectionThreadMessages.ts";
-import { ProjectionAgentPlanRepository } from "../../persistence/Services/ProjectionAgentPlans.ts";
 import {
   type ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
@@ -36,7 +36,6 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
-import { ProjectionAgentPlanRepositoryLive } from "../../persistence/Layers/ProjectionAgentPlans.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -67,7 +66,6 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
-  agentPlans: "projection.agent-plans",
 } as const;
 
 type ProjectorName =
@@ -483,7 +481,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
-    const projectionAgentPlanRepository = yield* ProjectionAgentPlanRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -607,6 +604,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            agentMetadata: event.payload.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA,
             latestTurnId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
@@ -666,6 +664,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
               : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.agent-metadata-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            agentMetadata: event.payload.agentMetadata,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -1463,142 +1476,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
-    const applyAgentPlansProjection: ProjectorDefinition["apply"] = Effect.fn(
-      "applyAgentPlansProjection",
-    )(function* (event, _attachmentSideEffects) {
-      switch (event.type) {
-        case "agent-plan.created":
-          yield* projectionAgentPlanRepository.upsertPlan({
-            planId: event.payload.planId,
-            title: event.payload.title,
-            userPrompt: event.payload.userPrompt,
-            status: event.payload.status,
-            ownerThreadId: event.payload.ownerThreadId,
-            primaryProjectId: event.payload.primaryProjectId,
-            projectIds: event.payload.projectIds,
-            createdAt: event.payload.createdAt,
-            updatedAt: event.payload.updatedAt,
-            deletedAt: null,
-          });
-          return;
-
-        case "agent-plan.updated": {
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionAgentPlanRepository.upsertPlan({
-            ...existingRow.value,
-            ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
-            ...(event.payload.userPrompt !== undefined
-              ? { userPrompt: event.payload.userPrompt }
-              : {}),
-            ...(event.payload.projectIds !== undefined
-              ? { projectIds: event.payload.projectIds }
-              : {}),
-            ...(event.payload.primaryProjectId !== undefined
-              ? { primaryProjectId: event.payload.primaryProjectId }
-              : {}),
-            ...(event.payload.ownerThreadId !== undefined
-              ? { ownerThreadId: event.payload.ownerThreadId }
-              : {}),
-            updatedAt: event.payload.updatedAt,
-          });
-          return;
-        }
-
-        case "agent-plan.status-changed": {
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionAgentPlanRepository.upsertPlan({
-            ...existingRow.value,
-            status: event.payload.status,
-            updatedAt: event.payload.updatedAt,
-          });
-          return;
-        }
-
-        case "agent-task.upserted": {
-          yield* projectionAgentPlanRepository.upsertTask(event.payload.task);
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isSome(existingRow)) {
-            yield* projectionAgentPlanRepository.upsertPlan({
-              ...existingRow.value,
-              updatedAt: event.payload.task.updatedAt,
-            });
-          }
-          return;
-        }
-
-        case "agent-shared-update.appended": {
-          yield* projectionAgentPlanRepository.upsertSharedUpdate(event.payload.update);
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isSome(existingRow)) {
-            yield* projectionAgentPlanRepository.upsertPlan({
-              ...existingRow.value,
-              updatedAt: event.payload.update.createdAt,
-            });
-          }
-          return;
-        }
-
-        case "agent-contract.upserted": {
-          yield* projectionAgentPlanRepository.upsertContract(event.payload.contract);
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isSome(existingRow)) {
-            yield* projectionAgentPlanRepository.upsertPlan({
-              ...existingRow.value,
-              updatedAt: event.payload.contract.updatedAt,
-            });
-          }
-          return;
-        }
-
-        case "agent-coordination-message.upserted": {
-          yield* projectionAgentPlanRepository.upsertCoordinationMessage(event.payload.message);
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isSome(existingRow)) {
-            yield* projectionAgentPlanRepository.upsertPlan({
-              ...existingRow.value,
-              updatedAt: event.payload.message.createdAt,
-            });
-          }
-          return;
-        }
-
-        case "agent-review.upserted": {
-          yield* projectionAgentPlanRepository.upsertReview(event.payload.review);
-          const existingRow = yield* projectionAgentPlanRepository.getPlanById({
-            planId: event.payload.planId,
-          });
-          if (Option.isSome(existingRow)) {
-            yield* projectionAgentPlanRepository.upsertPlan({
-              ...existingRow.value,
-              updatedAt: event.payload.review.updatedAt,
-            });
-          }
-          return;
-        }
-
-        default:
-          return;
-      }
-    });
-
     const projectors: ReadonlyArray<ProjectorDefinition> = [
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -1631,10 +1508,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
         apply: applyPendingApprovalsProjection,
-      },
-      {
-        name: ORCHESTRATION_PROJECTOR_NAMES.agentPlans,
-        apply: applyAgentPlansProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
@@ -1742,6 +1615,5 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
-  Layer.provideMerge(ProjectionAgentPlanRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

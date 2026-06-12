@@ -81,6 +81,11 @@ export interface CodexAdapterLiveOptions {
   >;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+  readonly executeDynamicTool?: (input: {
+    readonly ownerThreadId: ThreadId;
+    readonly params: EffectCodexSchema.DynamicToolCallParams;
+  }) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse, CodexErrors.CodexAppServerError>;
 }
 
 interface CodexAdapterSessionContext {
@@ -1397,6 +1402,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(options?.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
+          ...(options?.executeDynamicTool
+            ? { executeDynamicTool: options.executeDynamicTool }
+            : {}),
         };
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;

@@ -2,9 +2,11 @@ import {
   CheckpointRef,
   CommandId,
   CorrelationId,
+  DEFAULT_THREAD_AGENT_METADATA,
   EventId,
   MessageId,
   ProjectId,
+  ThreadAgentMetadata,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -15,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -51,6 +54,9 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+const decodeThreadAgentMetadataJson = Schema.decodeUnknownSync(
+  Schema.fromJsonString(ThreadAgentMetadata),
+);
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   it.effect("bootstraps all projection states and writes projection rows", () =>
@@ -174,6 +180,191 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 });
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-agent-metadata-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("persists thread agent metadata from create and update events", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+        const later = "2026-01-01T00:00:01.000Z";
+        const runningMetadata = {
+          role: "worker",
+          parentThreadId: ThreadId.make("thread-owner"),
+          delegationId: "delegation-1",
+          taskKey: "frontend",
+          taskTitle: "Implement frontend button",
+          taskStatus: "running",
+        } as const;
+        const doneMetadata = {
+          ...runningMetadata,
+          taskStatus: "done",
+        } as const;
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make("evt-agent-metadata-project"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make("project-agent-metadata"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-agent-metadata-project"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-agent-metadata-project"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make("project-agent-metadata"),
+            title: "Agent Metadata Project",
+            workspaceRoot: "/tmp/project-agent-metadata",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-agent-metadata-thread"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-worker"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-agent-metadata-thread"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-agent-metadata-thread"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-worker"),
+            projectId: ProjectId.make("project-agent-metadata"),
+            title: "Frontend worker",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: "worker/delegation-1/frontend",
+            worktreePath: "/tmp/project-agent-metadata/.worktrees/frontend",
+            agentMetadata: runningMetadata,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.agent-metadata-updated",
+          eventId: EventId.make("evt-agent-metadata-update"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-worker"),
+          occurredAt: later,
+          commandId: CommandId.make("cmd-agent-metadata-update"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-agent-metadata-update"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-worker"),
+            agentMetadata: doneMetadata,
+            updatedAt: later,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly agentMetadataJson: string;
+          readonly updatedAt: string;
+        }>`
+          SELECT
+            agent_metadata_json AS "agentMetadataJson",
+            updated_at AS "updatedAt"
+          FROM projection_threads
+          WHERE thread_id = 'thread-worker'
+        `;
+
+        assert.equal(rows.length, 1);
+        assert.deepEqual(
+          decodeThreadAgentMetadataJson(rows[0]?.agentMetadataJson ?? "null"),
+          doneMetadata,
+        );
+        assert.equal(rows[0]?.updatedAt, later);
+      }),
+    );
+
+    it.effect("defaults missing thread agent metadata for historical create events", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make("evt-default-agent-metadata-project"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make("project-default-agent-metadata"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-default-agent-metadata-project"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-default-agent-metadata-project"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make("project-default-agent-metadata"),
+            title: "Default Agent Metadata Project",
+            workspaceRoot: "/tmp/project-default-agent-metadata",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-default-agent-metadata-thread"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-default-agent-metadata"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-default-agent-metadata-thread"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-default-agent-metadata-thread"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-default-agent-metadata"),
+            projectId: ProjectId.make("project-default-agent-metadata"),
+            title: "Historical thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly agentMetadataJson: string;
+        }>`
+          SELECT agent_metadata_json AS "agentMetadataJson"
+          FROM projection_threads
+          WHERE thread_id = 'thread-default-agent-metadata'
+        `;
+
+        assert.equal(rows.length, 1);
+        assert.deepEqual(
+          decodeThreadAgentMetadataJson(rows[0]?.agentMetadataJson ?? "null"),
+          DEFAULT_THREAD_AGENT_METADATA,
+        );
+      }),
+    );
+  },
+);
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",

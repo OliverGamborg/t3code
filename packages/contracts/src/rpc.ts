@@ -53,17 +53,9 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
-  OrchestrationGetAgentPlanInput,
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
-  OrchestrationApproveAgentPlanTasksInput,
-  OrchestrationImportAgentPlanOwnerOutputInput,
-  OrchestrationLaunchAgentPlanReadyWorkersInput,
-  OrchestrationRetryAgentPlanCoordinationMessageInput,
-  OrchestrationSendAgentPlanWorkerMessageInput,
-  OrchestrationStartAgentPlanReviewInput,
-  OrchestrationStartAgentPlanOwnerPlanningInput,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -501,85 +493,6 @@ export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   },
 );
 
-export const WsOrchestrationGetAgentPlanRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getAgentPlan, {
-  payload: OrchestrationGetAgentPlanInput,
-  success: OrchestrationRpcSchemas.getAgentPlan.output,
-  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
-});
-
-export const WsOrchestrationStartAgentPlanOwnerPlanningRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning,
-  {
-    payload: OrchestrationStartAgentPlanOwnerPlanningInput,
-    success: OrchestrationRpcSchemas.startAgentPlanOwnerPlanning.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationImportAgentPlanOwnerOutputRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput,
-  {
-    payload: OrchestrationImportAgentPlanOwnerOutputInput,
-    success: OrchestrationRpcSchemas.importAgentPlanOwnerOutput.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationApproveAgentPlanTasksRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.approveAgentPlanTasks,
-  {
-    payload: OrchestrationApproveAgentPlanTasksInput,
-    success: OrchestrationRpcSchemas.approveAgentPlanTasks.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationLaunchAgentPlanReadyWorkersRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers,
-  {
-    payload: OrchestrationLaunchAgentPlanReadyWorkersInput,
-    success: OrchestrationRpcSchemas.launchAgentPlanReadyWorkers.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationSendAgentPlanWorkerMessageRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage,
-  {
-    payload: OrchestrationSendAgentPlanWorkerMessageInput,
-    success: OrchestrationRpcSchemas.sendAgentPlanWorkerMessage.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationRetryAgentPlanCoordinationMessageRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage,
-  {
-    payload: OrchestrationRetryAgentPlanCoordinationMessageInput,
-    success: OrchestrationRpcSchemas.retryAgentPlanCoordinationMessage.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationStartAgentPlanReviewRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.startAgentPlanReview,
-  {
-    payload: OrchestrationStartAgentPlanReviewInput,
-    success: OrchestrationRpcSchemas.startAgentPlanReview.output,
-    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
-  },
-);
-
-export const WsOrchestrationSubscribeAgentPlanRpc = Rpc.make(
-  ORCHESTRATION_WS_METHODS.subscribeAgentPlan,
-  {
-    payload: OrchestrationRpcSchemas.subscribeAgentPlan.input,
-    success: OrchestrationRpcSchemas.subscribeAgentPlan.output,
-    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
-    stream: true,
-  },
-);
-
 export const WsOrchestrationSubscribeShellRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeShell, {
   payload: OrchestrationRpcSchemas.subscribeShell.input,
   success: OrchestrationRpcSchemas.subscribeShell.output,
@@ -684,15 +597,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
-  WsOrchestrationGetAgentPlanRpc,
-  WsOrchestrationStartAgentPlanOwnerPlanningRpc,
-  WsOrchestrationImportAgentPlanOwnerOutputRpc,
-  WsOrchestrationApproveAgentPlanTasksRpc,
-  WsOrchestrationLaunchAgentPlanReadyWorkersRpc,
-  WsOrchestrationSendAgentPlanWorkerMessageRpc,
-  WsOrchestrationRetryAgentPlanCoordinationMessageRpc,
-  WsOrchestrationStartAgentPlanReviewRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
-  WsOrchestrationSubscribeAgentPlanRpc,
 );

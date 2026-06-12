@@ -45,15 +45,6 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
-  getAgentPlan: "orchestration.getAgentPlan",
-  startAgentPlanOwnerPlanning: "orchestration.startAgentPlanOwnerPlanning",
-  importAgentPlanOwnerOutput: "orchestration.importAgentPlanOwnerOutput",
-  approveAgentPlanTasks: "orchestration.approveAgentPlanTasks",
-  launchAgentPlanReadyWorkers: "orchestration.launchAgentPlanReadyWorkers",
-  sendAgentPlanWorkerMessage: "orchestration.sendAgentPlanWorkerMessage",
-  retryAgentPlanCoordinationMessage: "orchestration.retryAgentPlanCoordinationMessage",
-  startAgentPlanReview: "orchestration.startAgentPlanReview",
-  subscribeAgentPlan: "orchestration.subscribeAgentPlan",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -354,6 +345,49 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ThreadAgentRole = Schema.Literals(["user", "owner", "worker"]);
+export type ThreadAgentRole = typeof ThreadAgentRole.Type;
+
+export const ThreadAgentTaskStatus = Schema.Literals([
+  "running",
+  "blocked",
+  "done",
+  "failed",
+  "cancelled",
+]);
+export type ThreadAgentTaskStatus = typeof ThreadAgentTaskStatus.Type;
+
+export const DEFAULT_THREAD_AGENT_METADATA = {
+  role: "user",
+  parentThreadId: null,
+  delegationId: null,
+  taskKey: null,
+  taskTitle: null,
+  taskStatus: null,
+} as const;
+
+export const ThreadAgentMetadata = Schema.Struct({
+  role: ThreadAgentRole.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.role)),
+  ),
+  parentThreadId: Schema.NullOr(ThreadId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.parentThreadId)),
+  ),
+  delegationId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.delegationId)),
+  ),
+  taskKey: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.taskKey)),
+  ),
+  taskTitle: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.taskTitle)),
+  ),
+  taskStatus: Schema.NullOr(ThreadAgentTaskStatus).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_AGENT_METADATA.taskStatus)),
+  ),
+});
+export type ThreadAgentMetadata = typeof ThreadAgentMetadata.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -365,6 +399,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  agentMetadata: Schema.optional(ThreadAgentMetadata),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -412,6 +447,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  agentMetadata: Schema.optional(ThreadAgentMetadata),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -536,6 +572,7 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  agentMetadata: Schema.optional(ThreadAgentMetadata),
   createdAt: IsoDateTime,
 });
 
@@ -565,6 +602,14 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+
+const ThreadAgentMetadataUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.agent-metadata.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  agentMetadata: ThreadAgentMetadata,
+  updatedAt: Schema.optional(IsoDateTime),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -719,6 +764,12 @@ const AgentPlanStatusSetCommand = Schema.Struct({
   status: AgentPlanStatus,
 });
 
+const AgentPlanDeleteCommand = Schema.Struct({
+  type: Schema.Literal("agent-plan.delete"),
+  commandId: CommandId,
+  planId: AgentPlanId,
+});
+
 const AgentTaskUpsertCommand = Schema.Struct({
   type: Schema.Literal("agent-task.upsert"),
   commandId: CommandId,
@@ -763,6 +814,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadAgentMetadataUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -774,6 +826,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   AgentPlanCreateCommand,
   AgentPlanUpdateCommand,
   AgentPlanStatusSetCommand,
+  AgentPlanDeleteCommand,
   AgentTaskUpsertCommand,
   AgentSharedUpdateAppendCommand,
   AgentContractUpsertCommand,
@@ -792,6 +845,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadAgentMetadataUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -803,6 +857,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   AgentPlanCreateCommand,
   AgentPlanUpdateCommand,
   AgentPlanStatusSetCommand,
+  AgentPlanDeleteCommand,
   AgentTaskUpsertCommand,
   AgentSharedUpdateAppendCommand,
   AgentContractUpsertCommand,
@@ -902,6 +957,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.archived",
   "thread.unarchived",
   "thread.meta-updated",
+  "thread.agent-metadata-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -919,6 +975,7 @@ export const OrchestrationEventType = Schema.Literals([
   "agent-plan.created",
   "agent-plan.updated",
   "agent-plan.status-changed",
+  "agent-plan.deleted",
   "agent-task.upserted",
   "agent-shared-update.appended",
   "agent-contract.upserted",
@@ -968,6 +1025,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  agentMetadata: Schema.optional(ThreadAgentMetadata),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -994,6 +1052,12 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadAgentMetadataUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  agentMetadata: ThreadAgentMetadata,
   updatedAt: IsoDateTime,
 });
 
@@ -1126,6 +1190,11 @@ export const AgentPlanStatusChangedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const AgentPlanDeletedPayload = Schema.Struct({
+  planId: AgentPlanId,
+  deletedAt: IsoDateTime,
+});
+
 export const AgentTaskUpsertedPayload = Schema.Struct({
   planId: AgentPlanId,
   task: AgentTask,
@@ -1215,6 +1284,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.agent-metadata-updated"),
+    payload: ThreadAgentMetadataUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.runtime-mode-set"),
     payload: ThreadRuntimeModeSetPayload,
   }),
@@ -1297,6 +1371,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("agent-plan.status-changed"),
     payload: AgentPlanStatusChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent-plan.deleted"),
+    payload: AgentPlanDeletedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1571,42 +1650,6 @@ export const OrchestrationRpcSchemas = {
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
-  },
-  getAgentPlan: {
-    input: OrchestrationGetAgentPlanInput,
-    output: OrchestrationGetAgentPlanResult,
-  },
-  startAgentPlanOwnerPlanning: {
-    input: OrchestrationStartAgentPlanOwnerPlanningInput,
-    output: OrchestrationStartAgentPlanOwnerPlanningResult,
-  },
-  importAgentPlanOwnerOutput: {
-    input: OrchestrationImportAgentPlanOwnerOutputInput,
-    output: OrchestrationImportAgentPlanOwnerOutputResult,
-  },
-  approveAgentPlanTasks: {
-    input: OrchestrationApproveAgentPlanTasksInput,
-    output: OrchestrationLaunchAgentPlanReadyWorkersResult,
-  },
-  launchAgentPlanReadyWorkers: {
-    input: OrchestrationLaunchAgentPlanReadyWorkersInput,
-    output: OrchestrationLaunchAgentPlanReadyWorkersResult,
-  },
-  sendAgentPlanWorkerMessage: {
-    input: OrchestrationSendAgentPlanWorkerMessageInput,
-    output: DispatchResult,
-  },
-  retryAgentPlanCoordinationMessage: {
-    input: OrchestrationRetryAgentPlanCoordinationMessageInput,
-    output: DispatchResult,
-  },
-  startAgentPlanReview: {
-    input: OrchestrationStartAgentPlanReviewInput,
-    output: OrchestrationStartAgentPlanReviewResult,
-  },
-  subscribeAgentPlan: {
-    input: OrchestrationSubscribeAgentPlanInput,
-    output: OrchestrationAgentPlanStreamItem,
   },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,

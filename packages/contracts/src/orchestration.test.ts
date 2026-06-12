@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  DEFAULT_THREAD_AGENT_METADATA,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -25,6 +26,7 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./orchestration.ts";
 import { AgentPlan, AgentPlanShell, AgentTask } from "./agentPlan.ts";
+import { ThreadId } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
@@ -128,6 +130,7 @@ it.effect("rejects empty agent plan shell titles", () =>
         projectIds: ["project-1"],
         primaryProjectId: null,
         ownerThreadId: null,
+        workerThreadIds: [],
         taskCount: 0,
         runningTaskCount: 0,
         blockedTaskCount: 0,
@@ -140,6 +143,43 @@ it.effect("rejects empty agent plan shell titles", () =>
     );
 
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("decodes agent plan delete commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "agent-plan.delete",
+      commandId: "cmd-agent-plan-delete",
+      planId: "plan-1",
+    });
+    assert.strictEqual(command.type, "agent-plan.delete");
+    if (command.type !== "agent-plan.delete") {
+      assert.fail("Expected agent-plan.delete command.");
+    }
+    assert.strictEqual(command.planId, "plan-1");
+
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-agent-plan-delete",
+      aggregateKind: "agent-plan",
+      aggregateId: "plan-1",
+      type: "agent-plan.deleted",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-agent-plan-delete",
+      causationEventId: null,
+      correlationId: "cmd-agent-plan-delete",
+      metadata: {},
+      payload: {
+        planId: "plan-1",
+        deletedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    assert.strictEqual(event.type, "agent-plan.deleted");
+    if (event.type !== "agent-plan.deleted") {
+      assert.fail("Expected agent-plan.deleted event.");
+    }
+    assert.strictEqual(event.payload.planId, "plan-1");
   }),
 );
 
@@ -419,6 +459,62 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+    assert.deepStrictEqual(parsed.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA, {
+      role: "user",
+      parentThreadId: null,
+      delegationId: null,
+      taskKey: null,
+      taskTitle: null,
+      taskStatus: null,
+    });
+  }),
+);
+
+it.effect("decodes thread agent metadata update commands and events", () =>
+  Effect.gen(function* () {
+    const agentMetadata = {
+      role: "worker",
+      parentThreadId: ThreadId.make("thread-owner"),
+      delegationId: "delegation-1",
+      taskKey: "frontend",
+      taskTitle: "Implement frontend button",
+      taskStatus: "running",
+    } as const;
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.agent-metadata.update",
+      commandId: "cmd-agent-metadata",
+      threadId: "thread-worker",
+      agentMetadata,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "evt-agent-metadata",
+      aggregateKind: "thread",
+      aggregateId: "thread-worker",
+      type: "thread.agent-metadata-updated",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-agent-metadata",
+      causationEventId: null,
+      correlationId: "cmd-agent-metadata",
+      metadata: {},
+      payload: {
+        threadId: "thread-worker",
+        agentMetadata,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    assert.strictEqual(command.type, "thread.agent-metadata.update");
+    if (command.type !== "thread.agent-metadata.update") {
+      assert.fail("Expected thread.agent-metadata.update command.");
+    }
+    assert.deepStrictEqual(command.agentMetadata, agentMetadata);
+    assert.strictEqual(event.type, "thread.agent-metadata-updated");
+    if (event.type !== "thread.agent-metadata-updated") {
+      assert.fail("Expected thread.agent-metadata-updated event.");
+    }
+    assert.deepStrictEqual(event.payload.agentMetadata, agentMetadata);
   }),
 );
 

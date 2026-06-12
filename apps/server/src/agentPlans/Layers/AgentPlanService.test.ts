@@ -3,6 +3,8 @@ import {
   AgentPlanId,
   AgentTaskId,
   DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   MessageId,
   ModelSelection,
   OrchestrationDispatchCommandError,
@@ -449,6 +451,8 @@ function makeHarness(
     removeForAgentTask:
       input.worktrees?.removeForAgentTask ??
       (() => Effect.die("removeForAgentTask should not be called in this test")),
+    createForWorker: () => Effect.die("createForWorker should not be called in this test"),
+    removeForWorker: () => Effect.die("removeForWorker should not be called in this test"),
   };
   const layer = AgentPlanServiceLive.pipe(
     Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
@@ -497,12 +501,12 @@ describe("AgentPlanService", () => {
       assert.equal(result.ownerThreadId, threadCreate.threadId);
       assert.equal(planUpdate.ownerThreadId, threadCreate.threadId);
       assert.equal(statusSet.status, "planning");
-      assert.equal(threadCreate.runtimeMode, "approval-required");
-      assert.equal(threadCreate.interactionMode, "plan");
+      assert.equal(threadCreate.runtimeMode, DEFAULT_RUNTIME_MODE);
+      assert.equal(threadCreate.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
       assert.equal(turnStart.bootstrap, undefined);
       assert.equal(turnStart.threadId, threadCreate.threadId);
-      assert.equal(turnStart.runtimeMode, "approval-required");
-      assert.equal(turnStart.interactionMode, "plan");
+      assert.equal(turnStart.runtimeMode, DEFAULT_RUNTIME_MODE);
+      assert.equal(turnStart.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
       assert.match(turnStart.message.text, /Coordinate backend and frontend archive work/);
       assert.match(turnStart.message.text, /Owner Project/);
       assert.equal(result.sequence, 4);

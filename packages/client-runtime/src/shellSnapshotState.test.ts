@@ -2,6 +2,7 @@ import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  DEFAULT_THREAD_AGENT_METADATA,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -52,6 +53,7 @@ const BASE_SNAPSHOT: OrchestrationShellSnapshot = {
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
+      agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
     },
   ],
   agentPlans: [],

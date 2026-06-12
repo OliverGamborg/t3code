@@ -3,6 +3,7 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   createThreadJumpHintVisibilityController,
+  groupSidebarThreadsByAgentMetadata,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
@@ -15,6 +16,7 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarThreadAgentMetadata,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -32,6 +34,7 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type Project,
+  type SidebarThreadSummary,
   type Thread,
 } from "../types";
 
@@ -140,6 +143,108 @@ describe("getSidebarThreadIdsToPrewarm", () => {
 
   it("returns no thread ids when the limit is zero", () => {
     expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 0)).toEqual([]);
+  });
+});
+
+describe("groupSidebarThreadsByAgentMetadata", () => {
+  const makeThread = (
+    id: string,
+    overrides: Partial<SidebarThreadSummary> = {},
+  ): SidebarThreadSummary => ({
+    id: ThreadId.make(id),
+    environmentId: localEnvironmentId,
+    projectId: ProjectId.make("project-1"),
+    title: id,
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    session: null,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    archivedAt: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+    latestTurn: null,
+    branch: null,
+    worktreePath: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    ...overrides,
+  });
+
+  it("separates worker child threads from top-level project threads", () => {
+    const owner = makeThread("owner", {
+      title: "Owner",
+      agentMetadata: {
+        role: "owner",
+        parentThreadId: null,
+        delegationId: "delegation-1",
+        taskKey: null,
+        taskTitle: null,
+        taskStatus: null,
+      },
+    });
+    const activeWorker = makeThread("worker-active", {
+      title: "Active worker",
+      updatedAt: "2026-03-09T10:02:00.000Z",
+      agentMetadata: {
+        role: "worker",
+        parentThreadId: ThreadId.make("owner"),
+        delegationId: "delegation-1",
+        taskKey: "frontend",
+        taskTitle: "Frontend",
+        taskStatus: "running",
+      },
+    });
+    const archivedWorker = makeThread("worker-archived", {
+      title: "Archived worker",
+      archivedAt: "2026-03-09T10:03:00.000Z",
+      updatedAt: "2026-03-09T10:03:00.000Z",
+      agentMetadata: {
+        role: "worker",
+        parentThreadId: ThreadId.make("owner"),
+        delegationId: "delegation-1",
+        taskKey: "backend",
+        taskTitle: "Backend",
+        taskStatus: "done",
+      },
+    });
+    const userThread = makeThread("user-thread");
+
+    const grouped = groupSidebarThreadsByAgentMetadata({
+      threads: [owner, activeWorker, archivedWorker, userThread],
+      threadSortOrder: "updated_at",
+      getOwnerKey: (thread, parentThreadId) => `${thread.environmentId}:${parentThreadId}`,
+    });
+
+    expect(grouped.topLevelThreads.map((thread) => thread.id)).toEqual([
+      ThreadId.make("owner"),
+      ThreadId.make("user-thread"),
+    ]);
+    expect(
+      grouped.workerThreadsByOwnerKey
+        .get(`${localEnvironmentId}:${ThreadId.make("owner")}`)
+        ?.map((thread) => thread.id),
+    ).toEqual([ThreadId.make("worker-active")]);
+  });
+
+  it("defaults historical threads without metadata to user-owned top-level threads", () => {
+    const thread = makeThread("legacy-thread");
+
+    expect(resolveSidebarThreadAgentMetadata(thread)).toEqual({
+      role: "user",
+      parentThreadId: null,
+      delegationId: null,
+      taskKey: null,
+      taskTitle: null,
+      taskStatus: null,
+    });
+    expect(
+      groupSidebarThreadsByAgentMetadata({
+        threads: [thread],
+        threadSortOrder: "updated_at",
+        getOwnerKey: (workerThread, parentThreadId) =>
+          `${workerThread.environmentId}:${parentThreadId}`,
+      }).topLevelThreads,
+    ).toEqual([thread]);
   });
 });
 

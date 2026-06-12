@@ -262,6 +262,7 @@ export const AgentPlanShell = Schema.Struct({
   projectIds: Schema.Array(ProjectId),
   primaryProjectId: Schema.NullOr(ProjectId),
   ownerThreadId: Schema.NullOr(ThreadId),
+  workerThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   taskCount: NonNegativeInt,
   runningTaskCount: NonNegativeInt,
   blockedTaskCount: NonNegativeInt,

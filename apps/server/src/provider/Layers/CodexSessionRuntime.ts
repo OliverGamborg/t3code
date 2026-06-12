@@ -42,6 +42,12 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadStartResponse,
+);
+const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadResumeResponse,
+);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -84,6 +90,16 @@ const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffe
 
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
+
+const CodexThreadStartParamsWithDynamicTools = EffectCodexSchema.V2ThreadStartParams.pipe(
+  Schema.fieldsAssign({
+    dynamicTools: Schema.optionalKey(
+      Schema.Array(EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec),
+    ),
+  }),
+);
+export type CodexThreadStartParamsWithDynamicTools =
+  typeof CodexThreadStartParamsWithDynamicTools.Type;
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
@@ -103,6 +119,11 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+  readonly executeDynamicTool?: (input: {
+    readonly ownerThreadId: ThreadId;
+    readonly params: EffectCodexSchema.DynamicToolCallParams;
+  }) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse, CodexErrors.CodexAppServerError>;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -287,7 +308,10 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
-}): EffectCodexSchema.V2ThreadStartParams {
+  readonly dynamicTools:
+    | ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>
+    | undefined;
+}): CodexThreadStartParamsWithDynamicTools {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
     cwd: input.cwd,
@@ -295,6 +319,9 @@ function buildThreadStartParams(input: {
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+    ...(input.dynamicTools && input.dynamicTools.length > 0
+      ? { dynamicTools: input.dynamicTools }
+      : {}),
   };
 }
 
@@ -423,6 +450,12 @@ type CodexThreadOpenResponse =
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
 interface CodexThreadOpenClient {
+  readonly raw?: {
+    readonly request: (
+      method: CodexThreadOpenMethod,
+      payload: unknown,
+    ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  };
   readonly request: <M extends CodexThreadOpenMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
@@ -437,24 +470,57 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
+  const requestThreadOpen = (method: CodexThreadOpenMethod, payload: unknown) => {
+    if (input.client.raw) {
+      return input.client.raw.request(method, payload);
+    }
+    if (method === "thread/start") {
+      return input.client.request(
+        "thread/start",
+        payload as CodexRpc.ClientRequestParamsByMethod["thread/start"],
+      );
+    }
+    return input.client.request(
+      "thread/resume",
+      payload as CodexRpc.ClientRequestParamsByMethod["thread/resume"],
+    );
+  };
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    dynamicTools: input.dynamicTools,
   });
 
   if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
+    return requestThreadOpen("thread/start", startParams).pipe(
+      Effect.flatMap((response) =>
+        decodeV2ThreadStartResponse(response).pipe(
+          Effect.mapError((error) =>
+            toProtocolParseError("Invalid thread/start response payload", error),
+          ),
+        ),
+      ),
+    );
   }
 
-  return input.client
-    .request("thread/resume", {
-      threadId: resumeThreadId,
-      ...startParams,
-    })
+  return requestThreadOpen("thread/resume", {
+    threadId: resumeThreadId,
+    ...startParams,
+  })
+    .pipe(
+      Effect.flatMap((response) =>
+        decodeV2ThreadResumeResponse(response).pipe(
+          Effect.mapError((error) =>
+            toProtocolParseError("Invalid thread/resume response payload", error),
+          ),
+        ),
+      ),
+    )
     .pipe(
       Effect.catchIf(isRecoverableThreadResumeError, (error) =>
         Effect.logWarning("codex app-server thread resume fell back to fresh start", {
@@ -463,10 +529,42 @@ export const openCodexThread = (input: {
           resumeThreadId,
           recoverable: true,
           cause: error.message,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+        }).pipe(
+          Effect.andThen(
+            requestThreadOpen("thread/start", startParams).pipe(
+              Effect.flatMap((response) =>
+                decodeV2ThreadStartResponse(response).pipe(
+                  Effect.mapError((error) =>
+                    toProtocolParseError("Invalid thread/start response payload", error),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
 };
+
+export const dispatchCodexDynamicToolCall = (input: {
+  readonly ownerThreadId: ThreadId;
+  readonly params: EffectCodexSchema.DynamicToolCallParams;
+  readonly executeDynamicTool?: CodexSessionRuntimeOptions["executeDynamicTool"];
+}): Effect.Effect<EffectCodexSchema.DynamicToolCallResponse, CodexErrors.CodexAppServerError> =>
+  input.executeDynamicTool
+    ? input.executeDynamicTool({
+        ownerThreadId: input.ownerThreadId,
+        params: input.params,
+      })
+    : Effect.succeed({
+        success: false,
+        contentItems: [
+          {
+            type: "inputText",
+            text: `Dynamic tool '${input.params.tool}' is not available in this session.`,
+          },
+        ],
+      } satisfies EffectCodexSchema.DynamicToolCallResponse);
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
   switch (notification.method) {
@@ -1103,6 +1201,14 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
+    yield* client.handleServerRequest("item/tool/call", (payload) =>
+      dispatchCodexDynamicToolCall({
+        ownerThreadId: options.threadId,
+        params: payload,
+        ...(options.executeDynamicTool ? { executeDynamicTool: options.executeDynamicTool } : {}),
+      }),
+    );
+
     yield* client.handleUnknownServerRequest((method) =>
       Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
     );
@@ -1202,6 +1308,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
       });
 
       const providerThreadId = opened.thread.id;

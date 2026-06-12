@@ -57,9 +57,6 @@ import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
-import { AgentPlanServiceLive } from "./agentPlans/Layers/AgentPlanService.ts";
-import { AgentPlanService } from "./agentPlans/Services/AgentPlanService.ts";
-import { WorktreeManagerLive } from "./worktrees/Layers/WorktreeManager.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -104,7 +101,6 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
-const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -141,15 +137,6 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
-  [ORCHESTRATION_WS_METHODS.getAgentPlan, AuthOrchestrationReadScope],
-  [ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.approveAgentPlanTasks, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.startAgentPlanReview, AuthOrchestrationOperateScope],
-  [ORCHESTRATION_WS_METHODS.subscribeAgentPlan, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -279,7 +266,6 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
-      const agentPlanService = yield* AgentPlanService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -499,24 +485,6 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   kind: "thread-upserted" as const,
                   sequence: event.sequence,
                   thread: nextThread,
-                })),
-              ),
-              Effect.orElseSucceed(() => Option.none()),
-            );
-          case "agent-plan.created":
-          case "agent-plan.updated":
-          case "agent-plan.status-changed":
-          case "agent-task.upserted":
-          case "agent-shared-update.appended":
-          case "agent-contract.upserted":
-          case "agent-coordination-message.upserted":
-          case "agent-review.upserted":
-            return projectionSnapshotQuery.getAgentPlanShellById(event.payload.planId).pipe(
-              Effect.map((plan) =>
-                Option.map(plan, (nextPlan) => ({
-                  kind: "agent-plan-upserted" as const,
-                  sequence: event.sequence,
-                  plan: nextPlan,
                 })),
               ),
               Effect.orElseSucceed(() => Option.none()),
@@ -958,117 +926,6 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   }),
               ),
             ),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.getAgentPlan]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.getAgentPlan,
-            projectionSnapshotQuery.getAgentPlanDetailById(input.planId).pipe(
-              Effect.flatMap((detail) =>
-                Option.isSome(detail)
-                  ? Effect.succeed(detail.value)
-                  : Effect.fail(
-                      new OrchestrationGetSnapshotError({
-                        message: `Agent plan ${input.planId} was not found`,
-                        cause: input.planId,
-                      }),
-                    ),
-              ),
-              Effect.mapError((cause) =>
-                isOrchestrationGetSnapshotError(cause)
-                  ? cause
-                  : new OrchestrationGetSnapshotError({
-                      message: `Failed to load agent plan ${input.planId}`,
-                      cause,
-                    }),
-              ),
-            ),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.startAgentPlanOwnerPlanning,
-            agentPlanService.startOwnerPlanning(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.importAgentPlanOwnerOutput,
-            agentPlanService.importOwnerPlanOutput(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.approveAgentPlanTasks]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.approveAgentPlanTasks,
-            agentPlanService.approveAgentPlanTasks(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.launchAgentPlanReadyWorkers,
-            agentPlanService.launchReadyWorkers(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.sendAgentPlanWorkerMessage,
-            agentPlanService.sendWorkerMessage(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.retryAgentPlanCoordinationMessage,
-            agentPlanService.retryCoordinationMessage(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.startAgentPlanReview]: (input) =>
-          observeRpcEffect(
-            ORCHESTRATION_WS_METHODS.startAgentPlanReview,
-            agentPlanService.startReviewer(input),
-            { "rpc.aggregate": "orchestration" },
-          ),
-        [ORCHESTRATION_WS_METHODS.subscribeAgentPlan]: (input) =>
-          observeRpcStreamEffect(
-            ORCHESTRATION_WS_METHODS.subscribeAgentPlan,
-            Effect.gen(function* () {
-              const detail = yield* projectionSnapshotQuery
-                .getAgentPlanDetailById(input.planId)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load agent plan ${input.planId}`,
-                        cause,
-                      }),
-                  ),
-                );
-
-              if (Option.isNone(detail)) {
-                return yield* new OrchestrationGetSnapshotError({
-                  message: `Agent plan ${input.planId} was not found`,
-                  cause: input.planId,
-                });
-              }
-
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "agent-plan" && event.aggregateId === input.planId,
-                ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
-              );
-
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot: detail.value,
-                }),
-                liveStream,
-              );
-            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
@@ -1616,7 +1473,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(AgentPlanServiceLive.pipe(Layer.provide(WorktreeManagerLive))),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(

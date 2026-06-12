@@ -1,4 +1,5 @@
 import {
+  DEFAULT_THREAD_AGENT_METADATA,
   EventId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -241,6 +242,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          agentMetadata: command.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -253,6 +255,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const childWorkers = readModel.threads.filter(
+        (thread) =>
+          thread.deletedAt === null &&
+          (thread.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA).parentThreadId ===
+            command.threadId,
+      );
+      if (childWorkers.length > 0) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            ...childWorkers.map(
+              (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
+                type: "thread.delete",
+                commandId: command.commandId,
+                threadId: thread.id,
+              }),
+            ),
+            command,
+          ],
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -275,6 +298,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const childWorkers = readModel.threads.filter(
+        (thread) =>
+          thread.deletedAt === null &&
+          thread.archivedAt === null &&
+          (thread.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA).parentThreadId ===
+            command.threadId,
+      );
+      if (childWorkers.length > 0) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            ...childWorkers.map(
+              (thread): Extract<OrchestrationCommand, { type: "thread.archive" }> => ({
+                type: "thread.archive",
+                commandId: command.commandId,
+                threadId: thread.id,
+              }),
+            ),
+            command,
+          ],
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -337,6 +382,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.agent-metadata.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = command.updatedAt ?? (yield* nowIso);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.agent-metadata-updated",
+        payload: {
+          threadId: command.threadId,
+          agentMetadata: command.agentMetadata,
           updatedAt: occurredAt,
         },
       };
@@ -873,6 +941,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           planId: command.planId,
           status: command.status,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent-plan.delete": {
+      yield* requireAgentPlan({
+        readModel,
+        command,
+        planId: command.planId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent-plan",
+          aggregateId: command.planId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent-plan.deleted",
+        payload: {
+          planId: command.planId,
+          deletedAt: occurredAt,
         },
       };
     }

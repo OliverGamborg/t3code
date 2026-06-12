@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   CheckpointRef,
+  DEFAULT_THREAD_AGENT_METADATA,
   EventId,
   MessageId,
   ProjectId,
@@ -40,6 +41,7 @@ const baseThread: OrchestrationThread = {
   activities: [],
   checkpoints: [],
   session: null,
+  agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
 };
 
 describe("applyThreadDetailEvent", () => {
@@ -86,6 +88,7 @@ describe("applyThreadDetailEvent", () => {
           interactionMode: "default",
           branch: "main",
           worktreePath: null,
+          agentMetadata: DEFAULT_THREAD_AGENT_METADATA,
           createdAt: "2026-04-01T01:00:00.000Z",
           updatedAt: "2026-04-01T01:00:00.000Z",
         },

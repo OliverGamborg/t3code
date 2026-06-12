@@ -1,4 +1,5 @@
 import * as React from "react";
+import { DEFAULT_THREAD_AGENT_METADATA, type ThreadAgentMetadata } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -257,6 +258,57 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   limit = SIDEBAR_THREAD_PREWARM_LIMIT,
 ): TThreadId[] {
   return visibleThreadIds.slice(0, Math.max(0, limit));
+}
+
+export function resolveSidebarThreadAgentMetadata(thread: {
+  agentMetadata?: ThreadAgentMetadata | undefined;
+}): ThreadAgentMetadata {
+  return thread.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA;
+}
+
+export function groupSidebarThreadsByAgentMetadata<
+  TThread extends SidebarThreadSummary & ThreadSortInput,
+>(input: {
+  threads: readonly TThread[];
+  threadSortOrder: SidebarThreadSortOrder;
+  getOwnerKey: (thread: TThread, parentThreadId: string) => string;
+}): {
+  topLevelThreads: TThread[];
+  workerThreadsByOwnerKey: ReadonlyMap<string, readonly TThread[]>;
+} {
+  const topLevelThreads: TThread[] = [];
+  const workerThreadsByOwnerKey = new Map<string, TThread[]>();
+
+  for (const thread of input.threads) {
+    const parentThreadId = resolveSidebarThreadAgentMetadata(thread).parentThreadId;
+    if (parentThreadId === null) {
+      topLevelThreads.push(thread);
+      continue;
+    }
+
+    const ownerKey = input.getOwnerKey(thread, parentThreadId);
+    const existing = workerThreadsByOwnerKey.get(ownerKey);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      workerThreadsByOwnerKey.set(ownerKey, [thread]);
+    }
+  }
+
+  for (const [ownerKey, workerThreads] of workerThreadsByOwnerKey) {
+    workerThreadsByOwnerKey.set(
+      ownerKey,
+      sortThreads(
+        workerThreads.filter((thread) => thread.archivedAt === null),
+        input.threadSortOrder,
+      ),
+    );
+  }
+
+  return {
+    topLevelThreads,
+    workerThreadsByOwnerKey,
+  };
 }
 
 export function resolveAdjacentThreadId<T>(input: {

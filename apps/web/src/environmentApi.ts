@@ -53,20 +53,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
-      getAgentPlan: rpcClient.orchestration.getAgentPlan,
-      startAgentPlanOwnerPlanning: rpcClient.orchestration.startAgentPlanOwnerPlanning,
-      importAgentPlanOwnerOutput: rpcClient.orchestration.importAgentPlanOwnerOutput,
-      approveAgentPlanTasks: rpcClient.orchestration.approveAgentPlanTasks,
-      launchAgentPlanReadyWorkers: rpcClient.orchestration.launchAgentPlanReadyWorkers,
-      sendAgentPlanWorkerMessage: rpcClient.orchestration.sendAgentPlanWorkerMessage,
-      retryAgentPlanCoordinationMessage: rpcClient.orchestration.retryAgentPlanCoordinationMessage,
-      startAgentPlanReview: rpcClient.orchestration.startAgentPlanReview,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
-      subscribeAgentPlan: (input, callback, options) =>
-        rpcClient.orchestration.subscribeAgentPlan(input, callback, options),
     },
   };
 }

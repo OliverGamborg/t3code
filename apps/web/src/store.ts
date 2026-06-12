@@ -20,7 +20,12 @@ import type {
   ScopedProjectRef,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  DEFAULT_THREAD_AGENT_METADATA,
+  isProviderDriverKind,
+  ProviderDriverKind,
+  type ThreadAgentMetadata,
+} from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
@@ -243,11 +248,16 @@ function mapProject(
   };
 }
 
+function resolveAgentMetadata(metadata: ThreadAgentMetadata | undefined): ThreadAgentMetadata {
+  return metadata ?? DEFAULT_THREAD_AGENT_METADATA;
+}
+
 function mapAgentPlanShell(plan: AgentPlanShell, environmentId: EnvironmentId): AgentPlanSummary {
   return {
     ...plan,
     environmentId,
     projectIds: [...plan.projectIds],
+    workerThreadIds: [...plan.workerThreadIds],
   };
 }
 
@@ -274,6 +284,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    agentMetadata: { ...resolveAgentMetadata(thread.agentMetadata) },
   };
 }
 
@@ -301,6 +312,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    agentMetadata: { ...resolveAgentMetadata(thread.agentMetadata) },
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -324,6 +336,7 @@ function mapThreadShell(
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
+    agentMetadata: { ...resolveAgentMetadata(thread.agentMetadata) },
   };
   return {
     shell,
@@ -349,6 +362,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    agentMetadata: { ...resolveAgentMetadata(thread.agentMetadata) },
   };
 }
 
@@ -404,6 +418,22 @@ function threadSessionsEqual(
   );
 }
 
+function threadAgentMetadataEqual(
+  left: SidebarThreadSummary["agentMetadata"] | ThreadShell["agentMetadata"] | undefined,
+  right: SidebarThreadSummary["agentMetadata"] | ThreadShell["agentMetadata"] | undefined,
+): boolean {
+  const resolvedLeft = resolveAgentMetadata(left);
+  const resolvedRight = resolveAgentMetadata(right);
+  return (
+    resolvedLeft.role === resolvedRight.role &&
+    resolvedLeft.parentThreadId === resolvedRight.parentThreadId &&
+    resolvedLeft.delegationId === resolvedRight.delegationId &&
+    resolvedLeft.taskKey === resolvedRight.taskKey &&
+    resolvedLeft.taskTitle === resolvedRight.taskTitle &&
+    resolvedLeft.taskStatus === resolvedRight.taskStatus
+  );
+}
+
 function sidebarThreadSummariesEqual(
   left: SidebarThreadSummary | undefined,
   right: SidebarThreadSummary,
@@ -424,7 +454,8 @@ function sidebarThreadSummariesEqual(
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
-    left.hasActionableProposedPlan === right.hasActionableProposedPlan
+    left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
+    threadAgentMetadataEqual(left.agentMetadata, right.agentMetadata)
   );
 }
 
@@ -444,7 +475,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    threadAgentMetadataEqual(left.agentMetadata, right.agentMetadata)
   );
 }
 
@@ -469,6 +501,7 @@ function agentPlanSummariesEqual(
     arraysEqual(left.projectIds, right.projectIds) &&
     left.primaryProjectId === right.primaryProjectId &&
     left.ownerThreadId === right.ownerThreadId &&
+    arraysEqual(left.workerThreadIds, right.workerThreadIds) &&
     left.taskCount === right.taskCount &&
     left.runningTaskCount === right.runningTaskCount &&
     left.blockedTaskCount === right.blockedTaskCount &&
@@ -1387,6 +1420,7 @@ function applyEnvironmentOrchestrationEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          agentMetadata: event.payload.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA,
         },
         environmentId,
       );
@@ -1781,6 +1815,13 @@ function applyEnvironmentOrchestrationEvent(
           updatedAt: event.occurredAt,
         };
       });
+
+    case "thread.agent-metadata-updated":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        agentMetadata: { ...event.payload.agentMetadata },
+        updatedAt: event.payload.updatedAt,
+      }));
 
     case "thread.approval-response-requested":
     case "thread.user-input-response-requested":
