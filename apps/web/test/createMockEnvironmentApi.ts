@@ -39,6 +39,19 @@ export function createMockEnvironmentApi(overrides: EnvironmentApiOverrides = {}
       browse: rejectedMethod("filesystem.browse"),
       ...overrides.filesystem,
     },
+    assets: {
+      createUrl: vi.fn(async ({ resource }) => ({
+        relativeUrl: `/api/assets/test/${encodeURIComponent(
+          resource._tag === "attachment"
+            ? resource.attachmentId
+            : resource._tag === "project-favicon"
+              ? "favicon.svg"
+              : (resource.path.split(/[\\/]/).at(-1) ?? "asset"),
+        )}`,
+        expiresAt: Date.now() + 60_000,
+      })),
+      ...overrides.assets,
+    },
     sourceControl: {
       lookupRepository: rejectedMethod("sourceControl.lookupRepository"),
       cloneRepository: rejectedMethod("sourceControl.cloneRepository"),
@@ -74,6 +87,24 @@ export function createMockEnvironmentApi(overrides: EnvironmentApiOverrides = {}
       subscribeShell: throwingMethod("orchestration.subscribeShell"),
       subscribeThread: throwingMethod("orchestration.subscribeThread"),
       ...overrides.orchestration,
+    },
+    preview: {
+      open: rejectedMethod("preview.open"),
+      navigate: rejectedMethod("preview.navigate"),
+      refresh: rejectedMethod("preview.refresh"),
+      close: rejectedMethod("preview.close"),
+      list: vi.fn(async () => ({ sessions: [] })),
+      reportStatus: rejectedMethod("preview.reportStatus"),
+      automation: {
+        connect: throwingMethod("preview.automation.connect"),
+        respond: rejectedMethod("preview.automation.respond"),
+        reportOwner: rejectedMethod("preview.automation.reportOwner"),
+        clearOwner: rejectedMethod("preview.automation.clearOwner"),
+        ...overrides.preview?.automation,
+      },
+      onEvent: throwingMethod("preview.onEvent"),
+      subscribePorts: throwingMethod("preview.subscribePorts"),
+      ...overrides.preview,
     },
   };
 }
