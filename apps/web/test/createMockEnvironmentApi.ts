@@ -31,6 +31,8 @@ export function createMockEnvironmentApi(overrides: EnvironmentApiOverrides = {}
       ...overrides.terminal,
     },
     projects: {
+      listEntries: rejectedMethod("projects.listEntries"),
+      readFile: rejectedMethod("projects.readFile"),
       searchEntries: rejectedMethod("projects.searchEntries"),
       writeFile: rejectedMethod("projects.writeFile"),
       ...overrides.projects,
