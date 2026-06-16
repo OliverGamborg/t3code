@@ -4940,6 +4940,29 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("opens the subagents panel from the composer before workers exist", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-empty-subagents-panel" as MessageId,
+        targetText: "open empty subagents panel",
+      }),
+    });
+
+    try {
+      await page.getByRole("button", { name: "Show subagents sidebar" }).click();
+      await waitForElement(
+        () => document.querySelector('[data-testid="subagents-sidebar"]'),
+        "Subagents sidebar did not open from the composer.",
+      );
+      await expect
+        .element(page.getByTestId("subagents-sidebar").getByText("No subagents yet."))
+        .toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows the confirm archive action after clicking the archive button", async () => {
     localStorage.setItem(
       "t3code:client-settings:v1",

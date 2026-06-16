@@ -1325,8 +1325,7 @@ function ChatViewContent(props: ChatViewProps) {
       "updated_at",
     );
   }, [activeThread, serverThreads, subagentOwnerThread]);
-  const subagentsAvailable =
-    subagentOwnerThread !== null && subagentThreadsForActiveContext.length > 0;
+  const subagentsAvailable = subagentOwnerThread !== null;
 
   const activeRightPanelKind = useRightPanelStore((store) =>
     selectActiveRightPanelKindWithUrl(store.byThreadKey, activeThreadRef, diffOpen),

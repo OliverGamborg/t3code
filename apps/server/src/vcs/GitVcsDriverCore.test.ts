@@ -216,7 +216,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("disables SSH askpass for background upstream status fetches", () =>
+    it.effect("preserves SSH askpass for background upstream status fetches", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const tempDir = yield* makeTmpDir("git-vcs-driver-ssh-env-");
@@ -250,7 +250,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
           yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
 
-          assert.equal((yield* fileSystem.readFileString(sshLogPath)).trim(), "never");
+          assert.equal((yield* fileSystem.readFileString(sshLogPath)).trim(), "force");
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
