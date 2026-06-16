@@ -24,6 +24,7 @@ import {
   AgentDelegationToolService,
   AgentDelegationToolServiceLive,
 } from "./AgentDelegationToolService.ts";
+import { AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS } from "./delegationInstructions.ts";
 
 const decodeWorkerSpawnedActivityPayload = Schema.decodeUnknownEffect(WorkerSpawnedActivityPayload);
 const decodeWorkerReportActivityPayload = Schema.decodeUnknownEffect(WorkerReportActivityPayload);
@@ -114,12 +115,23 @@ function runWithFakes<A>(
 }
 
 describe("AgentDelegationToolService", () => {
-  it.effect("describes early implementation and verification delegation", () =>
+  it("makes subagent spawning the owner-thread default in developer instructions", () => {
+    assert.include(AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS, "Owner-thread default");
+    assert.include(AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS, "small independent commands");
+    assert.include(AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS, "repo scans");
+    assert.include(AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS, "batches of up to 8");
+    assert.include(AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS, "choose not to spawn workers");
+  });
+
+  it.effect("describes early command, discovery, implementation, and verification delegation", () =>
     Effect.gen(function* () {
       const service = yield* AgentDelegationToolService;
       const spawnTool = service.dynamicTools.find((tool) => tool.name === "spawn_workers");
 
-      assert.include(spawnTool?.description ?? "", "Prefer using this early");
+      assert.include(spawnTool?.description ?? "", "Default to using this early");
+      assert.include(spawnTool?.description ?? "", "independent command");
+      assert.include(spawnTool?.description ?? "", "repo/folder scan");
+      assert.include(spawnTool?.description ?? "", "small checks and discovery tasks");
       assert.include(spawnTool?.description ?? "", "<project>-implementation");
       assert.include(spawnTool?.description ?? "", "<project>-verification");
     }).pipe(

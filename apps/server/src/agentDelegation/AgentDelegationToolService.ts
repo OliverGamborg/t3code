@@ -94,7 +94,7 @@ const dynamicTools: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__Dynamic
     namespace: "t3",
     name: "spawn_workers",
     description:
-      "Create and launch up to 8 non-blocking worker threads for parallel subagent work. Prefer using this early for multi-project, multi-package, or test-heavy tasks. For each touched project that needs implementation and tests, default to two workers: <project>-implementation and <project>-verification. Workers inherit the current project, model, and runtime mode and report back with t3.report_to_owner.",
+      "Create and launch up to 8 non-blocking worker threads for parallel subagent work. Default to using this early whenever any independent command, test, repo/folder scan, code-reading task, implementation step, or verification step can run while the owner continues coordinating. This is encouraged for small checks and discovery tasks too, not only large or test-heavy work. For broad repo/folder discovery, split by repo, folder group, or command group. For each touched project that needs implementation and tests, default to two workers: <project>-implementation and <project>-verification. Workers inherit the current project, model, and runtime mode and report back with t3.report_to_owner.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -104,14 +104,14 @@ const dynamicTools: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__Dynamic
           type: "string",
           minLength: 1,
           description:
-            "Concise owner-level summary of the delegated work and why it is parallelizable.",
+            "Concise owner-level summary of the delegated work and what independent work will run in parallel.",
         },
         workers: {
           type: "array",
           minItems: 1,
           maxItems: MAX_WORKERS_PER_CALL,
           description:
-            "Subagent assignments. For each project/package with meaningful implementation and required tests, prefer one implementation worker and one verification worker.",
+            "Subagent assignments. Prefer one worker per independent command, test suite, repo/folder group, investigation scope, implementation scope, or verification scope. For each project/package with meaningful implementation and required tests, prefer one implementation worker and one verification worker.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -132,7 +132,7 @@ const dynamicTools: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__Dynamic
                 type: "string",
                 minLength: 1,
                 description:
-                  "Full worker assignment including scope, relevant guidelines, required files, tests/checks, and report expectations.",
+                  "Full worker assignment including scope, exact commands or checks to run when relevant, allowed paths, blocked paths, success criteria, required tests/checks, and report expectations.",
               },
               successCriteria: {
                 type: "array",
