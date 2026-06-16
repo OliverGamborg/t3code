@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 import {
@@ -24,6 +25,8 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  WorkerReportActivityPayload,
+  WorkerSpawnedActivityPayload,
 } from "./orchestration.ts";
 import { AgentPlan, AgentPlanShell, AgentTask } from "./agentPlan.ts";
 import { ThreadId } from "./baseSchemas.ts";
@@ -63,6 +66,8 @@ const decodeStartAgentPlanOwnerPlanningInput = Schema.decodeUnknownEffect(
 const decodeRetryAgentPlanCoordinationMessageInput = Schema.decodeUnknownEffect(
   OrchestrationRetryAgentPlanCoordinationMessageInput,
 );
+const decodeWorkerSpawnedActivityPayload = Schema.decodeUnknownEffect(WorkerSpawnedActivityPayload);
+const decodeWorkerReportActivityPayload = Schema.decodeUnknownEffect(WorkerReportActivityPayload);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -515,6 +520,94 @@ it.effect("decodes thread agent metadata update commands and events", () =>
       assert.fail("Expected thread.agent-metadata-updated event.");
     }
     assert.deepStrictEqual(event.payload.agentMetadata, agentMetadata);
+  }),
+);
+
+it.effect("decodes worker spawned activity payloads", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWorkerSpawnedActivityPayload({
+      delegationId: "delegation-1",
+      summary: "Split frontend and backend work.",
+      workers: [
+        {
+          key: "frontend-implementation",
+          title: "Frontend implementation",
+          threadId: "thread-worker-frontend",
+          branch: "worker/delegation-1/frontend-implementation",
+          worktreePath: "/repo/.t3/worktrees/frontend-implementation",
+        },
+      ],
+    });
+
+    assert.strictEqual(parsed.delegationId, "delegation-1");
+    assert.strictEqual(parsed.workers[0]?.threadId, "thread-worker-frontend");
+  }),
+);
+
+it.effect("rejects malformed worker spawned activity payloads", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(
+      decodeWorkerSpawnedActivityPayload({
+        delegationId: "delegation-1",
+        summary: "Split work.",
+        workers: [
+          {
+            key: "frontend-implementation",
+            title: "Frontend implementation",
+            threadId: "",
+            branch: "worker/delegation-1/frontend-implementation",
+            worktreePath: "/repo/.t3/worktrees/frontend-implementation",
+          },
+        ],
+      }),
+    );
+
+    assert.isTrue(Result.isFailure(result));
+  }),
+);
+
+it.effect("decodes worker report activity payloads", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWorkerReportActivityPayload({
+      workerThreadId: "thread-worker-frontend",
+      workerTitle: "Frontend implementation",
+      taskKey: "frontend-implementation",
+      status: "done",
+      title: "Frontend complete",
+      summary: "Implemented the subagent sidebar card.",
+      details: "The sidebar now renders worker status and reports.",
+      changedFiles: ["apps/web/src/components/SubagentsSidebar.tsx"],
+      testResults: ["vp test apps/web/src/components/ChatView.browser.tsx passed"],
+      blockers: [],
+      needsOwnerResponse: false,
+      delivery: "visible",
+    });
+
+    assert.strictEqual(parsed.status, "done");
+    assert.strictEqual(parsed.changedFiles[0], "apps/web/src/components/SubagentsSidebar.tsx");
+  }),
+);
+
+it.effect("rejects malformed worker report activity payloads", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(
+      decodeWorkerReportActivityPayload({
+        workerThreadId: "thread-worker-frontend",
+        workerTitle: "Frontend implementation",
+        taskKey: "frontend-implementation",
+        status: "progress",
+        title: "Frontend progress",
+        summary: "Working",
+        details: "",
+        changedFiles: [],
+        testResults: [],
+        blockers: [],
+        needsOwnerResponse: false,
+        delivery: "visible",
+      }),
+    );
+
+    assert.isTrue(Result.isFailure(result));
   }),
 );
 

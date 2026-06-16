@@ -78,6 +78,7 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  activityPayload?: unknown;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -756,6 +757,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
+  }
+  if (activity.kind === "worker.spawned" || activity.kind === "worker.report") {
+    entry.activityPayload = activity.payload;
   }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {

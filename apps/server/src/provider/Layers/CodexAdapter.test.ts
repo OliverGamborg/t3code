@@ -227,6 +227,7 @@ const validationLayer = it.layer(
     Effect.gen(function* () {
       const codexConfig = decodeCodexSettings({});
       return yield* makeCodexAdapter(codexConfig, {
+        developerInstructions: "Prefer early subagent delegation.",
         makeRuntime: validationRuntimeFactory.factory,
       });
     }),
@@ -279,6 +280,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
         binaryPath: "codex",
         cwd: process.cwd(),
+        developerInstructions: "Prefer early subagent delegation.",
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
         serviceTier: "priority",

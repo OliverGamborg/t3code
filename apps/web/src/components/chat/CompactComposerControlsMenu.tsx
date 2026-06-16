@@ -1,6 +1,6 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { EllipsisIcon, ListTodoIcon, NetworkIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -17,11 +17,14 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   interactionMode: ProviderInteractionMode;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
+  subagentsAvailable: boolean;
+  subagentsSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
+  onToggleSubagentsSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   return (
@@ -81,6 +84,15 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               {props.planSidebarOpen
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
                 : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`}
+            </MenuItem>
+          </>
+        ) : null}
+        {props.subagentsAvailable ? (
+          <>
+            <MenuDivider />
+            <MenuItem onClick={props.onToggleSubagentsSidebar}>
+              <NetworkIcon className="size-4 shrink-0" />
+              {props.subagentsSidebarOpen ? "Hide subagents sidebar" : "Show subagents sidebar"}
             </MenuItem>
           </>
         ) : null}

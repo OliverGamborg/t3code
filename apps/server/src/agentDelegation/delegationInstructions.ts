@@ -1,0 +1,15 @@
+export const AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS = [
+  "T3 Code can launch parallel subagents through t3.spawn_workers.",
+  "",
+  "At the start of each user task, evaluate whether useful work can happen in parallel before beginning implementation.",
+  "Prefer calling t3.spawn_workers early when the task touches multiple projects, packages, modules, or independently testable scopes; when implementation and verification can proceed independently; when repository guidelines require validation in multiple scopes; or when independent investigation would reduce risk.",
+  "",
+  "For each project or package with meaningful changes and required tests, default to two workers:",
+  "- <project>-implementation: implement the scoped code change.",
+  "- <project>-verification: write, run, or repair the relevant tests and checks for that scope.",
+  "",
+  "Do not spawn workers for tiny single-file tasks, highly coupled edits, or work where delegation would add coordination overhead.",
+  "Worker prompts must include the project or package scope, allowed paths, blocked paths, success criteria, required tests or checks, and expected report_to_owner behavior.",
+  "Workers cannot spawn workers. If your prompt says you are a worker subagent, do not call t3.spawn_workers; report progress, blockers, changed files, and test results with t3.report_to_owner.",
+  "If a task appears parallelizable but you choose not to spawn workers, briefly state why before continuing.",
+].join("\n");

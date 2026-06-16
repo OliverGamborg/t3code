@@ -3,6 +3,7 @@ import {
   type MessageId,
   type ScopedThreadRef,
   type ServerProviderSkill,
+  ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime";
@@ -49,6 +50,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
+  NetworkIcon,
   PaintbrushIcon,
   MinusIcon,
   SquarePenIcon,
@@ -92,6 +94,11 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
+import {
+  readWorkerReportPayload,
+  readWorkerSpawnedPayload,
+  workerStatusClassName,
+} from "../../subagentActivities";
 
 import {
   buildInlineTerminalContextText,
@@ -125,6 +132,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenThread: (threadId: ThreadId) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
 }
 
@@ -154,6 +162,7 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenThread: (threadId: ThreadId) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -181,6 +190,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
+  onOpenThread,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -322,6 +332,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenThread,
       onToggleTurnFold,
     }),
     [
@@ -335,6 +346,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenThread,
       onToggleTurnFold,
     ],
   );
@@ -403,6 +415,13 @@ type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
+
+function isSubagentWorkEntry(workEntry: Pick<TimelineWorkEntry, "sourceActivityKind">): boolean {
+  return (
+    workEntry.sourceActivityKind === "worker.spawned" ||
+    workEntry.sourceActivityKind === "worker.report"
+  );
+}
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
@@ -731,10 +750,15 @@ const WorkGroupSection = memo(function WorkGroupSection({
     [groupedEntries],
   );
   const hasOverflow = nonEmptyEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : nonEmptyEntries;
+  const visibleEntries = useMemo(() => {
+    if (!hasOverflow || isExpanded) {
+      return nonEmptyEntries;
+    }
+    const latestEntries = new Set(nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES));
+    return nonEmptyEntries.filter(
+      (entry) => isSubagentWorkEntry(entry) || latestEntries.has(entry),
+    );
+  }, [hasOverflow, isExpanded, nonEmptyEntries]);
   const hiddenCount = nonEmptyEntries.length - visibleEntries.length;
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
   const groupLabel = onlyToolEntries
@@ -785,13 +809,17 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </p>
       )}
       <div className="space-y-px">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={workEntry.id}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
+        {visibleEntries.map((workEntry) =>
+          isSubagentWorkEntry(workEntry) ? (
+            <SubagentWorkEntryRow key={workEntry.id} workEntry={workEntry} />
+          ) : (
+            <SimpleWorkEntryRow
+              key={workEntry.id}
+              workEntry={workEntry}
+              workspaceRoot={workspaceRoot}
+            />
+          ),
+        )}
       </div>
       {hasOverflow && (
         <button
@@ -1533,6 +1561,102 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
+const SubagentWorkEntryRow = memo(function SubagentWorkEntryRow(props: {
+  workEntry: TimelineWorkEntry;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const spawnedPayload =
+    props.workEntry.sourceActivityKind === "worker.spawned"
+      ? readWorkerSpawnedPayload(props.workEntry.activityPayload)
+      : null;
+  if (spawnedPayload) {
+    return (
+      <div
+        className="rounded-lg border border-border/70 bg-card/60 p-3"
+        data-testid="timeline-subagents-launched"
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <NetworkIcon className="size-4 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">Subagents launched</div>
+            <div className="line-clamp-2 text-xs text-muted-foreground">
+              {spawnedPayload.summary}
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {spawnedPayload.workers.map((worker) => (
+            <button
+              key={worker.threadId}
+              type="button"
+              className="min-w-0 rounded-md border border-border/70 bg-background/65 px-2.5 py-2 text-left transition hover:bg-muted/60"
+              onClick={() => ctx.onOpenThread(worker.threadId)}
+            >
+              <div className="truncate text-xs font-medium text-foreground">{worker.title}</div>
+              <div className="truncate text-[11px] text-muted-foreground">
+                {formatWorkspaceRelativePath(worker.branch, ctx.workspaceRoot)}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const reportPayload =
+    props.workEntry.sourceActivityKind === "worker.report"
+      ? readWorkerReportPayload(props.workEntry.activityPayload)
+      : null;
+  if (reportPayload) {
+    const changedFiles = reportPayload.changedFiles.filter(
+      (filePath) => filePath.trim().length > 0,
+    );
+    const firstTestResult = reportPayload.testResults.find((result) => result.trim().length > 0);
+    const firstBlocker = reportPayload.blockers.find((blocker) => blocker.trim().length > 0);
+    const detail =
+      changedFiles.length > 0
+        ? changedFiles
+            .slice(0, 2)
+            .map((filePath) => formatWorkspaceRelativePath(filePath, ctx.workspaceRoot))
+            .join(", ")
+        : firstTestResult || firstBlocker || reportPayload.details;
+    return (
+      <button
+        type="button"
+        className="w-full rounded-lg border border-border/70 bg-card/60 p-3 text-left transition hover:bg-muted/45"
+        data-testid={`timeline-subagent-report-${reportPayload.workerThreadId}`}
+        onClick={() => ctx.onOpenThread(reportPayload.workerThreadId)}
+      >
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-foreground">
+              {reportPayload.workerTitle}
+            </div>
+            <div className="line-clamp-2 text-xs text-muted-foreground">
+              {reportPayload.summary}
+            </div>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] capitalize leading-none",
+              workerStatusClassName(reportPayload.status),
+            )}
+          >
+            {reportPayload.status}
+          </span>
+        </div>
+        {detail ? (
+          <div className="mt-2 truncate rounded-md bg-background/65 px-2 py-1 text-[11px] text-muted-foreground">
+            {detail}
+          </div>
+        ) : null}
+      </button>
+    );
+  }
+
+  return <SimpleWorkEntryRow workEntry={props.workEntry} workspaceRoot={ctx.workspaceRoot} />;
+});
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;

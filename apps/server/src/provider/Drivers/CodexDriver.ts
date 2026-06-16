@@ -54,6 +54,7 @@ import {
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
 import { AgentDelegationToolService } from "../../agentDelegation/AgentDelegationToolService.ts";
+import { AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS } from "../../agentDelegation/delegationInstructions.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -158,6 +159,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         environment: processEnv,
         ...(agentDelegationTools
           ? {
+              developerInstructions: AGENT_DELEGATION_DEVELOPER_INSTRUCTIONS,
               dynamicTools: agentDelegationTools.dynamicTools,
               executeDynamicTool: agentDelegationTools.execute,
             }

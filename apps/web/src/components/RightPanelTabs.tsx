@@ -1,6 +1,15 @@
 import type { PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  ClipboardList,
+  FileDiff,
+  Files,
+  Globe2,
+  NetworkIcon,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { isElectron } from "~/env";
@@ -29,9 +38,11 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddSubagents: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  subagentsAvailable: boolean;
   children: ReactNode;
 }
 
@@ -39,6 +50,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the T3 Code desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
+  subagents: "Subagents appear after an owner thread launches worker threads.",
 } as const;
 
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
@@ -74,11 +86,21 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddSubagents: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  subagentsAvailable: boolean;
 }) {
   const actions = [
+    {
+      label: "Subagents",
+      description: "Review and open worker threads.",
+      icon: NetworkIcon,
+      available: props.subagentsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.subagents,
+      onClick: props.onAddSubagents,
+    },
     {
       label: "Browser",
       description: "Open a local app or URL.",
@@ -188,6 +210,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "subagents":
+      return "Subagents";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -249,6 +273,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "subagents":
+      return <NetworkIcon className="size-3.5 shrink-0" />;
   }
 }
 
@@ -351,6 +377,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 </MenuTrigger>
                 <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
                   <SurfaceMenuItem
+                    available={props.subagentsAvailable}
+                    disabledReason={SURFACE_DISABLED_REASONS.subagents}
+                    onClick={props.onAddSubagents}
+                  >
+                    <NetworkIcon />
+                    Subagents
+                  </SurfaceMenuItem>
+                  <SurfaceMenuItem
                     available={props.browserAvailable}
                     disabledReason={SURFACE_DISABLED_REASONS.browser}
                     onClick={props.onAddBrowser}
@@ -391,9 +425,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddSubagents={props.onAddSubagents}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            subagentsAvailable={props.subagentsAvailable}
           />
         ) : (
           props.children

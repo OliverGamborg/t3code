@@ -264,6 +264,7 @@ describe("openCodexThread", () => {
         cwd: "/tmp/project",
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
+        developerInstructions: "Prefer early subagent delegation.",
         resumeThreadId: undefined,
         dynamicTools: [dynamicTool],
       });
@@ -276,6 +277,7 @@ describe("openCodexThread", () => {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         model: "gpt-5.3-codex",
+        developerInstructions: "Prefer early subagent delegation.",
         dynamicTools: [dynamicTool],
       });
     }),

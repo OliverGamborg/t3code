@@ -407,7 +407,7 @@ function createSnapshotWithWorkerThreads(): OrchestrationReadModel {
       {
         ...ownerThread,
         title: "Create user button",
-        updatedAt: isoAt(120),
+        updatedAt: isoAt(150),
         agentMetadata: {
           role: "owner",
           parentThreadId: null,
@@ -417,6 +417,34 @@ function createSnapshotWithWorkerThreads(): OrchestrationReadModel {
           taskStatus: null,
         },
         activities: [
+          {
+            id: EventId.make("activity-worker-spawned"),
+            tone: "tool",
+            kind: "worker.spawned",
+            summary: "Launched 2 workers",
+            payload: {
+              delegationId,
+              summary: "Split user creation between frontend and backend subagents.",
+              workers: [
+                {
+                  key: "frontend",
+                  title: "Implement frontend button",
+                  threadId: FRONTEND_WORKER_THREAD_ID,
+                  branch: "worker/create-user/frontend",
+                  worktreePath: "/repo/project/.t3/worktrees/worker-frontend",
+                },
+                {
+                  key: "backend",
+                  title: "Implement backend user creation",
+                  threadId: BACKEND_WORKER_THREAD_ID,
+                  branch: "worker/create-user/backend",
+                  worktreePath: "/repo/project/.t3/worktrees/worker-backend",
+                },
+              ],
+            },
+            turnId: null,
+            createdAt: isoAt(140),
+          },
           {
             id: EventId.make("activity-worker-report-frontend"),
             tone: "tool",
@@ -437,7 +465,7 @@ function createSnapshotWithWorkerThreads(): OrchestrationReadModel {
               delivery: "visible",
             },
             turnId: null,
-            createdAt: isoAt(90),
+            createdAt: isoAt(145),
           },
         ],
       },
@@ -4842,21 +4870,49 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("shows thread-native workers in the owner view and nests workers in the sidebar", async () => {
+  it("shows thread-native subagents in the owner view and nests workers in the sidebar", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
       snapshot: createSnapshotWithWorkerThreads(),
     });
 
     try {
-      await expect.element(page.getByTestId("worker-threads-panel")).toBeInTheDocument();
+      await waitForElement(
+        () => document.querySelector('[data-testid="subagents-sidebar"]'),
+        "Subagents sidebar did not open.",
+      );
+      await waitForElement(
+        () =>
+          document.querySelector(
+            `[data-testid="subagent-thread-card-${FRONTEND_WORKER_THREAD_ID}"]`,
+          ),
+        "Frontend subagent card did not render.",
+      );
+      await waitForElement(
+        () =>
+          document.querySelector(
+            `[data-testid="subagent-thread-card-${BACKEND_WORKER_THREAD_ID}"]`,
+          ),
+        "Backend subagent card did not render.",
+      );
+      await waitForElement(
+        () => document.querySelector('[data-testid="timeline-subagents-launched"]'),
+        "Subagents launch timeline card did not render.",
+      );
+      await waitForElement(
+        () =>
+          document.querySelector(
+            `[data-testid="timeline-subagent-report-${FRONTEND_WORKER_THREAD_ID}"]`,
+          ),
+        "Subagent report timeline card did not render.",
+      );
       await expect
-        .element(page.getByTestId(`worker-thread-row-${FRONTEND_WORKER_THREAD_ID}`))
-        .toBeInTheDocument();
-      await expect
-        .element(page.getByTestId(`worker-thread-row-${BACKEND_WORKER_THREAD_ID}`))
-        .toBeInTheDocument();
-      await expect.element(page.getByText("Implemented button and wired API call.")).toBeVisible();
+        .element(
+          page
+            .getByTestId(`timeline-subagent-report-${FRONTEND_WORKER_THREAD_ID}`)
+            .getByText("Implemented button and wired API call."),
+        )
+        .toBeVisible();
 
       await expect.element(page.getByTestId(`thread-row-${THREAD_ID}`)).toBeInTheDocument();
       await expect
@@ -4866,11 +4922,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
         .element(page.getByTestId(`thread-row-${BACKEND_WORKER_THREAD_ID}`))
         .toBeInTheDocument();
 
-      await page.getByTestId(`worker-thread-row-${FRONTEND_WORKER_THREAD_ID}`).click();
+      await page.getByTestId(`subagent-thread-card-${FRONTEND_WORKER_THREAD_ID}`).click();
       await waitForURL(
         mounted.router,
         (pathname) => pathname === serverThreadPath(FRONTEND_WORKER_THREAD_ID),
         "Worker row did not navigate to the child thread.",
+      );
+      await expect.element(page.getByTestId("worker-back-to-owner")).toBeInTheDocument();
+      await page.getByTestId("worker-back-to-owner").click();
+      await waitForURL(
+        mounted.router,
+        (pathname) => pathname === serverThreadPath(THREAD_ID),
+        "Back to owner did not navigate to the parent thread.",
       );
     } finally {
       await mounted.cleanup();

@@ -399,6 +399,38 @@ export const ThreadAgentMetadata = Schema.Struct({
 });
 export type ThreadAgentMetadata = typeof ThreadAgentMetadata.Type;
 
+export const WorkerSpawnedActivityWorker = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+});
+export type WorkerSpawnedActivityWorker = typeof WorkerSpawnedActivityWorker.Type;
+
+export const WorkerSpawnedActivityPayload = Schema.Struct({
+  delegationId: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  workers: Schema.Array(WorkerSpawnedActivityWorker),
+});
+export type WorkerSpawnedActivityPayload = typeof WorkerSpawnedActivityPayload.Type;
+
+export const WorkerReportActivityPayload = Schema.Struct({
+  workerThreadId: ThreadId,
+  workerTitle: TrimmedNonEmptyString,
+  taskKey: Schema.NullOr(TrimmedNonEmptyString),
+  status: ThreadAgentTaskStatus,
+  title: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  details: Schema.String,
+  changedFiles: Schema.Array(Schema.String),
+  testResults: Schema.Array(Schema.String),
+  blockers: Schema.Array(Schema.String),
+  needsOwnerResponse: Schema.Boolean,
+  delivery: Schema.Literal("visible"),
+});
+export type WorkerReportActivityPayload = typeof WorkerReportActivityPayload.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,

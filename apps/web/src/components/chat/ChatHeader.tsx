@@ -15,6 +15,7 @@ import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { cn } from "~/lib/utils";
+import { ArrowLeftIcon } from "lucide-react";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -33,6 +34,8 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   rightPanelOpen: boolean;
+  ownerThreadTitle?: string | undefined;
+  onOpenOwnerThread?: (() => void) | undefined;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -64,6 +67,8 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   rightPanelOpen,
+  ownerThreadTitle,
+  onOpenOwnerThread,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -75,6 +80,24 @@ export const ChatHeader = memo(function ChatHeader({
     <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden sm:flex-1 sm:flex-nowrap sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        {ownerThreadTitle && onOpenOwnerThread ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
+                  onClick={onOpenOwnerThread}
+                  data-testid="worker-back-to-owner"
+                />
+              }
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              <span className="hidden sm:inline">Back to owner</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">{ownerThreadTitle}</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

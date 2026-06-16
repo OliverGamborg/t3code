@@ -4,6 +4,8 @@ import {
   EventId,
   MessageId,
   ThreadId,
+  WorkerReportActivityPayload,
+  WorkerSpawnedActivityPayload,
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -50,6 +52,8 @@ const ReportToOwnerInput = Schema.Struct({
 
 const decodeSpawnWorkersInput = Schema.decodeUnknownEffect(SpawnWorkersInput);
 const decodeReportToOwnerInput = Schema.decodeUnknownEffect(ReportToOwnerInput);
+const encodeWorkerSpawnedActivityPayload = Schema.encodeEffect(WorkerSpawnedActivityPayload);
+const encodeWorkerReportActivityPayload = Schema.encodeEffect(WorkerReportActivityPayload);
 
 function resolveThreadAgentMetadata(thread: OrchestrationThread) {
   return thread.agentMetadata ?? DEFAULT_THREAD_AGENT_METADATA;
@@ -90,28 +94,62 @@ const dynamicTools: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__Dynamic
     namespace: "t3",
     name: "spawn_workers",
     description:
-      "Create and launch up to 8 non-blocking worker threads for parallel implementation work. Workers inherit the current project, model, and runtime mode and report back with t3.report_to_owner.",
+      "Create and launch up to 8 non-blocking worker threads for parallel subagent work. Prefer using this early for multi-project, multi-package, or test-heavy tasks. For each touched project that needs implementation and tests, default to two workers: <project>-implementation and <project>-verification. Workers inherit the current project, model, and runtime mode and report back with t3.report_to_owner.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["summary", "workers"],
       properties: {
-        summary: { type: "string", minLength: 1 },
+        summary: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Concise owner-level summary of the delegated work and why it is parallelizable.",
+        },
         workers: {
           type: "array",
           minItems: 1,
           maxItems: MAX_WORKERS_PER_CALL,
+          description:
+            "Subagent assignments. For each project/package with meaningful implementation and required tests, prefer one implementation worker and one verification worker.",
           items: {
             type: "object",
             additionalProperties: false,
             required: ["key", "title", "prompt", "successCriteria", "allowedPaths", "blockedPaths"],
             properties: {
-              key: { type: "string", minLength: 1 },
-              title: { type: "string", minLength: 1 },
-              prompt: { type: "string", minLength: 1 },
-              successCriteria: { type: "array", items: { type: "string" } },
-              allowedPaths: { type: "array", items: { type: "string" } },
-              blockedPaths: { type: "array", items: { type: "string" } },
+              key: {
+                type: "string",
+                minLength: 1,
+                description:
+                  "Stable kebab-case task key, such as apps-web-implementation or apps-server-verification.",
+              },
+              title: {
+                type: "string",
+                minLength: 1,
+                description: "Short human-readable subagent title shown in T3 Code.",
+              },
+              prompt: {
+                type: "string",
+                minLength: 1,
+                description:
+                  "Full worker assignment including scope, relevant guidelines, required files, tests/checks, and report expectations.",
+              },
+              successCriteria: {
+                type: "array",
+                description: "Concrete completion criteria the worker should satisfy.",
+                items: { type: "string" },
+              },
+              allowedPaths: {
+                type: "array",
+                description:
+                  "Paths the worker should stay within whenever possible, such as apps/web or packages/contracts.",
+                items: { type: "string" },
+              },
+              blockedPaths: {
+                type: "array",
+                description: "Paths the worker must avoid unless explicitly instructed otherwise.",
+                items: { type: "string" },
+              },
             },
           },
         },
@@ -348,15 +386,17 @@ const make = Effect.gen(function* () {
       });
     }
 
+    const spawnedPayload = yield* encodeWorkerSpawnedActivityPayload({
+      delegationId,
+      summary: input.summary,
+      workers: launched,
+    });
+
     yield* dispatchActivity({
       threadId: owner.id,
       kind: "worker.spawned",
       summary: `Launched ${launched.length} worker${launched.length === 1 ? "" : "s"}`,
-      payload: {
-        delegationId,
-        summary: input.summary,
-        workers: launched,
-      },
+      payload: spawnedPayload,
     });
 
     return textToolResponse(true, {
@@ -403,25 +443,27 @@ const make = Effect.gen(function* () {
       updatedAt,
     });
 
+    const reportPayload = yield* encodeWorkerReportActivityPayload({
+      workerThreadId: worker.id,
+      workerTitle: worker.title,
+      taskKey: workerAgentMetadata.taskKey,
+      status: input.status,
+      title: input.title,
+      summary: input.summary,
+      details: input.details,
+      changedFiles: input.changedFiles,
+      testResults: input.testResults,
+      blockers: input.blockers,
+      needsOwnerResponse: input.needsOwnerResponse,
+      delivery: "visible",
+    });
+
     yield* dispatchActivity({
       threadId: owner.id,
       kind: "worker.report",
       tone: input.status === "failed" || input.status === "blocked" ? "error" : "tool",
       summary: `${worker.title}: ${input.summary}`,
-      payload: {
-        workerThreadId: worker.id,
-        workerTitle: worker.title,
-        taskKey: workerAgentMetadata.taskKey,
-        status: input.status,
-        title: input.title,
-        summary: input.summary,
-        details: input.details,
-        changedFiles: input.changedFiles,
-        testResults: input.testResults,
-        blockers: input.blockers,
-        needsOwnerResponse: input.needsOwnerResponse,
-        delivery: "visible",
-      },
+      payload: reportPayload,
     });
 
     return textToolResponse(true, {

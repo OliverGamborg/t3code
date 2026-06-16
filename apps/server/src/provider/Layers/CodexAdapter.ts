@@ -82,6 +82,7 @@ export interface CodexAdapterLiveOptions {
   >;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly developerInstructions?: string;
   readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
   readonly executeDynamicTool?: (input: {
     readonly ownerThreadId: ThreadId;
@@ -1407,6 +1408,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(options?.developerInstructions
+            ? { developerInstructions: options.developerInstructions }
+            : {}),
           ...(options?.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
           ...(options?.executeDynamicTool
             ? { executeDynamicTool: options.executeDynamicTool }
